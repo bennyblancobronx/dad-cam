@@ -4,6 +4,62 @@ This is the source of truth for version number.
 
 ---
 
+0.1.18 — Phase 1 Audit Verified
+
+- Independent audit confirmed all 19 Phase 1 checklist items pass
+- Verified: library init, schema, file discovery, dedup, copy verification
+- Verified: metadata extraction, job durability, crash recovery, per-file tracking
+- Verified: sidecar discovery/linking, volume capture, fingerprints, camera profiles
+- Verified: job cancellation, relink scan, all CLI commands functional
+- Updated techguide.md version sync (was 0.1.14, now 0.1.18)
+- Project compiles clean with cargo check (47 warnings, 0 errors)
+
+---
+
+0.1.17 — Phase 1 Complete (100%)
+
+- Added volume identity tracking during ingest (serial, label, mount point)
+- Volume info captured on macOS, Windows, and Linux via platform-specific calls
+- Assets now linked to volumes via asset_volumes table for relink support
+- Sidecars (THM, XML, XMP, SRT) now discovered and copied during ingest
+- Sidecars linked to clips with role="sidecar" in clip_assets table
+- Camera profile matching now called during ingest pipeline
+- Clips assigned camera_profile_id when confidence >= 50%
+- Added schema functions: get_or_create_volume, link_asset_volume, update_clip_camera_profile
+- Phase 1 checklist now 100% complete (19/19 items)
+
+---
+
+0.1.16 — Phase 1 Audit Fixes
+
+- Added tools.rs module for bundled tool resolution (ffprobe, ffmpeg, exiftool)
+- Tools now resolve via: env override, sidecar, macOS Resources, PATH fallback
+- Updated ffprobe.rs and exiftool.rs to use tools module
+- Implemented relink-scan command with fingerprint matching (size_duration + hash)
+- Added schema functions: find_clips_by_fingerprint, get_missing_assets, get_clip_by_asset
+- Fixed unit tests: added tempfile dev dependency, fixed lib name mismatch
+- All 6 unit tests now pass (hash, discover, tools modules)
+
+---
+
+0.1.15 — Phase 1 Implementation Complete
+
+- Created Tauri 2.0 project scaffold with React + TypeScript frontend
+- Implemented complete Rust backend with modular architecture
+- Database module: SQLite with rusqlite, migrations system, schema helpers
+- Hash module: BLAKE3 fast hash (first/last 1MB + size), full hash, verification
+- Metadata module: FFprobe wrapper for video properties, ExifTool wrapper for camera info
+- Ingest module: File discovery, copy with verification, timestamp precedence
+- Jobs module: Durable queue with leases, retries, exponential backoff, crash recovery
+- Camera module: Profile matching with confidence scoring, default profiles
+- CLI commands: init, ingest, list, show, jobs, relink-scan
+- Tauri commands: open_library, create_library, get_clips, get_clip, toggle_tag, set_tag, start_ingest, get_jobs
+- Library structure: .dadcam/ folder with db, proxies, thumbs, sprites, exports
+- Dedup via fast hash, fingerprints for relink, per-file ingest tracking
+- Cross-platform ready (macOS, Windows, Linux)
+
+---
+
 0.1.14 — GitHub Prep
 
 - Added .gitignore for macOS, IDE, Tauri/Rust, Node/React, and runtime files
