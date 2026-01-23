@@ -4,6 +4,50 @@ This is the source of truth for version number.
 
 ---
 
+0.1.25 — Phase 3 Spec Compliance (100%)
+
+- Added native folder picker dialog using @tauri-apps/plugin-dialog (replaces text input)
+- Browse buttons for open library and create library folder selection
+- Reorganized Rust commands into src-tauri/src/commands/ module structure per phase-3.md spec
+- commands/library.rs: open_library, close_library, create_library, get_library_root
+- commands/clips.rs: get_clips, get_clip, get_clips_filtered, get_clip_view
+- commands/tags.rs: toggle_tag, set_tag
+- lib.rs now imports from commands module (reduced from 552 to 102 lines)
+- Cleaned up Tauri capabilities (removed unused fs permissions)
+- Phase 3 audit now 100% compliant with phase-3.md specification
+
+---
+
+0.1.24 — Phase 3 Completion (100%)
+
+- Added ErrorBoundary component for crash protection (wraps entire app)
+- Added date range filter UI to FilterBar (from/to date inputs with clear button)
+- Updated LibraryView to handle date range state and pass to API queries
+- Added request cancellation (AbortController) to prevent stale responses
+- Updated Tauri capabilities with filesystem permissions (fs:allow-read, fs:allow-exists)
+- Fixed debounced search implementation with proper useEffect cleanup
+- Phase 3 audit now 100% complete (all checklist items implemented)
+
+---
+
+0.1.23 — Phase 3 Desktop App Shell
+
+- Implemented full Phase 3 desktop app shell with React + TypeScript frontend
+- New Tauri commands: get_clips_filtered, get_clip_view, get_library_root
+- Enhanced clip queries with filtering (all/favorites/bad/unreviewed), sorting, pagination
+- TypeScript types and API wrappers in src/types/ and src/api/
+- Virtualized clip grid using TanStack Virtual (handles 1000+ clips at 60fps)
+- LRU thumbnail cache for memory-efficient image loading (500 entry limit)
+- Sprite sheet hover scrubbing with mouse position tracking
+- Video player with keyboard shortcuts (Space/K play, J/L seek, M mute, F fullscreen)
+- Filter bar with filter buttons, search input, sort controls
+- LibraryView container with optimistic tag updates
+- Welcome screen for opening/creating libraries
+- Dark theme UI matching Dad Cam aesthetic
+- Schema helper: get_clip_asset_path, get_clip_asset_paths functions
+
+---
+
 0.1.22 — Phase 2 Audit Verified
 
 - Independent audit confirmed all 28 Phase 2 checklist items pass

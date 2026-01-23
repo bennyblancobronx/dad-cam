@@ -1,116 +1,262 @@
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
+/* Dad Cam - Phase 3 Styles */
+
+/* Reset and base */
+* {
+  box-sizing: border-box;
 }
 
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafb);
-}
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   font-size: 16px;
-  line-height: 24px;
+  line-height: 1.5;
   font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
+  color: #ffffff;
+  background-color: #0f0f0f;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
 }
 
-.container {
+body {
   margin: 0;
-  padding-top: 10vh;
+  padding: 0;
+}
+
+/* Welcome Screen */
+.app-welcome {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.welcome-container {
+  max-width: 480px;
+  width: 100%;
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
+.welcome-title {
+  font-size: 48px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  color: #ffffff;
 }
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
+.welcome-subtitle {
+  font-size: 18px;
+  color: #888888;
+  margin: 0 0 32px 0;
 }
 
-.row {
-  display: flex;
-  justify-content: center;
+/* Forms */
+.open-form,
+.create-form {
+  background-color: #1a1a1a;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
+.input-group {
+  margin-bottom: 16px;
+  text-align: left;
 }
 
-a:hover {
-  color: #535bf2;
+.input-group label {
+  display: block;
+  font-size: 14px;
+  color: #888888;
+  margin-bottom: 8px;
 }
 
-h1 {
-  text-align: center;
-}
-
-input,
-button {
+.input-group input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  border: 1px solid #333333;
   border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  background-color: #2a2a2a;
+  color: #ffffff;
+  transition: border-color 0.2s;
 }
 
-button {
+.input-group input:focus {
+  outline: none;
+  border-color: #4a9eff;
+}
+
+.input-group input::placeholder {
+  color: #666666;
+}
+
+.input-group input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Input with button (for folder browse) */
+.input-with-button {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-button input {
+  flex: 1;
+}
+
+.browse-button {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid #444444;
+  border-radius: 8px;
+  background-color: #333333;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.browse-button:hover:not(:disabled) {
+  background-color: #444444;
+}
+
+.browse-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Buttons */
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.primary-button,
+.secondary-button {
+  flex: 1;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 500;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.primary-button {
+  background-color: #4a9eff;
+  color: #ffffff;
+  border: none;
+}
+
+.primary-button:hover:not(:disabled) {
+  background-color: #3a8eef;
+}
+
+.primary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  background-color: transparent;
+  color: #888888;
+  border: 1px solid #444444;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background-color: #2a2a2a;
+  color: #ffffff;
+}
+
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Error message */
+.error-message {
+  background-color: #442222;
+  color: #ff8888;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+/* Help text */
+.help-text {
+  color: #666666;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.help-text code {
+  background-color: #2a2a2a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  color: #4a9eff;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #444444;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+/* Video player range input */
+input[type="range"] {
+  -webkit-appearance: none;
+  height: 4px;
+  background: #333333;
+  border-radius: 2px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #4a9eff;
+  border-radius: 50%;
   cursor: pointer;
 }
 
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: #5ab0ff;
 }
 
-input,
-button {
-  outline: none;
+/* Select styling */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
 }
 
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
+/* Focus visible for accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 2px;
 }

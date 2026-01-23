@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.22
+Version: 0.1.25
 
 ---
 
@@ -452,7 +452,7 @@ See docs/planning/phase-6.md for implementation details.
 
 Desktop App Architecture
 
-(Populated in Phase 3)
+(Implemented in Phase 3 - v0.1.23)
 
 Frontend Stack:
 - React 18+ with TypeScript

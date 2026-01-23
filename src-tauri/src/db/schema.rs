@@ -387,6 +387,40 @@ pub fn link_clip_asset(conn: &Connection, clip_id: i64, asset_id: i64, role: &st
     Ok(())
 }
 
+/// Get asset path for a clip by role (original, proxy, thumb, sprite)
+pub fn get_clip_asset_path(conn: &Connection, clip_id: i64, role: &str) -> Result<Option<String>> {
+    let result = conn.query_row(
+        "SELECT a.path FROM clip_assets ca
+         JOIN assets a ON ca.asset_id = a.id
+         WHERE ca.clip_id = ?1 AND ca.role = ?2
+         LIMIT 1",
+        params![clip_id, role],
+        |row| row.get(0),
+    ).optional()?;
+    Ok(result)
+}
+
+/// Get all asset paths for a clip as a map of role -> path
+pub fn get_clip_asset_paths(conn: &Connection, clip_id: i64) -> Result<std::collections::HashMap<String, String>> {
+    let mut stmt = conn.prepare(
+        "SELECT ca.role, a.path FROM clip_assets ca
+         JOIN assets a ON ca.asset_id = a.id
+         WHERE ca.clip_id = ?1"
+    )?;
+
+    let mut paths = std::collections::HashMap::new();
+    let rows = stmt.query_map(params![clip_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+
+    for row in rows {
+        let (role, path) = row?;
+        paths.insert(role, path);
+    }
+
+    Ok(paths)
+}
+
 // ----- Jobs -----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
