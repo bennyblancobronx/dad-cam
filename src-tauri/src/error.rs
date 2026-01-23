@@ -37,6 +37,9 @@ pub enum DadCamError {
     #[error("ExifTool error: {0}")]
     ExifTool(String),
 
+    #[error("FFmpeg error: {0}")]
+    FFmpeg(String),
+
     #[error("Hash error: {0}")]
     Hash(String),
 

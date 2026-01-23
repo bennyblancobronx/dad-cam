@@ -9,6 +9,7 @@ pub mod metadata;
 pub mod ingest;
 pub mod jobs;
 pub mod camera;
+pub mod preview;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

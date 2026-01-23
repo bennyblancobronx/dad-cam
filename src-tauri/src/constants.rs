@@ -43,7 +43,8 @@ pub const THUMB_QUALITY: u32 = 85;
 // Sprite settings
 pub const SPRITE_FPS: u32 = 1;
 pub const SPRITE_TILE_WIDTH: u32 = 160;
-pub const SPRITE_MAX_FRAMES: u32 = 120;
+pub const SPRITE_MAX_FRAMES: u32 = 600;      // Overall cap (10 minutes @ 1fps)
+pub const SPRITE_PAGE_COLS: u32 = 60;        // Frames per sprite sheet page
 
 // Camera profiles
 pub const CAMERA_PROFILE_FORMAT: &str = "json";

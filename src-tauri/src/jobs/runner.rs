@@ -5,7 +5,9 @@ use rusqlite::Connection;
 use crate::db::schema;
 use crate::jobs::{claim_job, complete_job, fail_job, heartbeat_job, reclaim_expired_jobs};
 use crate::ingest;
+use crate::preview;
 use crate::error::{DadCamError, Result};
+use crate::constants::PIPELINE_VERSION;
 
 /// Run a single job from the queue
 pub fn run_next_job(conn: &Connection, library_root: &Path) -> Result<bool> {
@@ -29,8 +31,11 @@ pub fn run_next_job(conn: &Connection, library_root: &Path) -> Result<bool> {
     let result = match job.job_type.as_str() {
         "ingest" => run_ingest_job(conn, &job, library_root),
         "hash_full" => run_hash_full_job(conn, &job),
-        "proxy" | "thumb" | "sprite" | "score" | "export" | "ml" => {
-            // Phase 2+ jobs - not implemented yet
+        "proxy" => run_proxy_job(conn, &job, library_root),
+        "thumb" => run_thumb_job(conn, &job, library_root),
+        "sprite" => run_sprite_job(conn, &job, library_root),
+        "score" | "export" | "ml" => {
+            // Phase 3+ jobs - not implemented yet
             Err(DadCamError::Other(format!("Job type '{}' not yet implemented", job.job_type)))
         }
         _ => Err(DadCamError::Other(format!("Unknown job type: {}", job.job_type))),
@@ -115,4 +120,276 @@ pub fn count_pending_jobs(conn: &Connection) -> Result<Vec<(String, i64)>> {
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
     Ok(counts)
+}
+
+/// Run a proxy generation job
+fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let clip_id = job.clip_id
+        .ok_or_else(|| DadCamError::Other("Proxy job has no clip_id".to_string()))?;
+
+    // Get clip and its original asset
+    let clip = schema::get_clip(conn, clip_id)?
+        .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
+
+    let original = preview::get_clip_original_asset(conn, clip_id)?
+        .ok_or_else(|| DadCamError::AssetNotFound(clip.original_asset_id))?;
+
+    // Build source path
+    let source_path = library_root.join(&original.path);
+    if !source_path.exists() {
+        return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
+    }
+
+    // Determine parameters based on media type
+    let deinterlace = if clip.media_type == "video" {
+        let meta = crate::metadata::ffprobe::probe(&source_path)?;
+        preview::proxy::needs_deinterlace(&meta)
+    } else {
+        false
+    };
+
+    // Create derived params (include camera_profile_id and source hash for invalidation)
+    let params = preview::DerivedParams::for_proxy(
+        deinterlace,
+        None, // No LUT for now
+        clip.camera_profile_id,
+        original.hash_fast.clone(),
+    );
+
+    // Check for existing asset and if it's stale
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "proxy")? {
+        if !preview::is_asset_stale(&existing, &params, original.hash_fast.as_deref()) {
+            // Already up to date
+            return Ok(());
+        }
+        // Remove old file
+        let old_path = library_root.join(&existing.path);
+        let _ = std::fs::remove_file(&old_path);
+    }
+
+    // Determine extension and generate
+    let extension = if clip.media_type == "audio" { "m4a" } else { "mp4" };
+    let output_path = preview::get_derived_path(library_root, clip_id, "proxy", &params, extension);
+
+    // Generate the proxy
+    if clip.media_type == "audio" {
+        preview::proxy::generate_audio_proxy(&source_path, &output_path)
+            .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+    } else {
+        let options = preview::proxy::ProxyOptions {
+            deinterlace,
+            target_fps: 30,
+            lut_path: None,
+        };
+        preview::proxy::generate_proxy(&source_path, &output_path, &options)
+            .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+    }
+
+    // Get file size
+    let size = std::fs::metadata(&output_path)?.len() as i64;
+
+    // Store relative path
+    let rel_path = preview::to_relative_path(library_root, &output_path);
+
+    // Create or update asset record
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "proxy")? {
+        preview::update_derived_asset(
+            conn,
+            existing.id,
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+    } else {
+        let asset_id = preview::create_derived_asset(
+            conn,
+            clip.library_id,
+            "proxy",
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+        schema::link_clip_asset(conn, clip_id, asset_id, "proxy")?;
+    }
+
+    Ok(())
+}
+
+/// Run a thumbnail generation job
+fn run_thumb_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let clip_id = job.clip_id
+        .ok_or_else(|| DadCamError::Other("Thumb job has no clip_id".to_string()))?;
+
+    let clip = schema::get_clip(conn, clip_id)?
+        .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
+
+    let original = preview::get_clip_original_asset(conn, clip_id)?
+        .ok_or_else(|| DadCamError::AssetNotFound(clip.original_asset_id))?;
+
+    let source_path = library_root.join(&original.path);
+    if !source_path.exists() {
+        return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
+    }
+
+    // Create params (include camera_profile_id and source hash)
+    let params = preview::DerivedParams::for_thumb(
+        clip.camera_profile_id,
+        original.hash_fast.clone(),
+    );
+
+    // Check for existing
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "thumb")? {
+        if !preview::is_asset_stale(&existing, &params, original.hash_fast.as_deref()) {
+            return Ok(());
+        }
+        let old_path = library_root.join(&existing.path);
+        let _ = std::fs::remove_file(&old_path);
+    }
+
+    let output_path = preview::get_derived_path(library_root, clip_id, "thumb", &params, "jpg");
+    let options = preview::thumb::ThumbOptions::default();
+
+    // Generate based on media type
+    match clip.media_type.as_str() {
+        "video" => {
+            preview::thumb::generate_thumbnail(&source_path, &output_path, clip.duration_ms, &options)
+                .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+        }
+        "audio" => {
+            preview::thumb::generate_audio_thumbnail(&source_path, &output_path, &options)
+                .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+        }
+        "image" => {
+            preview::thumb::generate_image_thumbnail(&source_path, &output_path, &options)
+                .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+        }
+        _ => {
+            return Err(DadCamError::Other(format!(
+                "Unsupported media type for thumbnail: {}",
+                clip.media_type
+            )));
+        }
+    }
+
+    let size = std::fs::metadata(&output_path)?.len() as i64;
+    let rel_path = preview::to_relative_path(library_root, &output_path);
+
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "thumb")? {
+        preview::update_derived_asset(
+            conn,
+            existing.id,
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+    } else {
+        let asset_id = preview::create_derived_asset(
+            conn,
+            clip.library_id,
+            "thumb",
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+        schema::link_clip_asset(conn, clip_id, asset_id, "thumb")?;
+    }
+
+    Ok(())
+}
+
+/// Run a sprite sheet generation job
+fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let clip_id = job.clip_id
+        .ok_or_else(|| DadCamError::Other("Sprite job has no clip_id".to_string()))?;
+
+    let clip = schema::get_clip(conn, clip_id)?
+        .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
+
+    // Sprites only make sense for video
+    if clip.media_type != "video" {
+        return Ok(());
+    }
+
+    let duration_ms = clip.duration_ms.ok_or_else(|| {
+        DadCamError::Other("Clip has no duration for sprite generation".to_string())
+    })?;
+
+    let original = preview::get_clip_original_asset(conn, clip_id)?
+        .ok_or_else(|| DadCamError::AssetNotFound(clip.original_asset_id))?;
+
+    let source_path = library_root.join(&original.path);
+    if !source_path.exists() {
+        return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
+    }
+
+    // Create params (include camera_profile_id and source hash)
+    let params = preview::DerivedParams::for_sprite(
+        duration_ms,
+        clip.camera_profile_id,
+        original.hash_fast.clone(),
+    );
+
+    // Check for existing
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "sprite")? {
+        if !preview::is_asset_stale(&existing, &params, original.hash_fast.as_deref()) {
+            return Ok(());
+        }
+        let old_path = library_root.join(&existing.path);
+        let _ = std::fs::remove_file(&old_path);
+        // Also remove VTT and JSON metadata if exist
+        let old_vtt = old_path.with_extension("vtt");
+        let old_json = old_path.with_extension("json");
+        let _ = std::fs::remove_file(&old_vtt);
+        let _ = std::fs::remove_file(&old_json);
+    }
+
+    let output_path = preview::get_derived_path(library_root, clip_id, "sprite", &params, "jpg");
+    let options = preview::sprite::SpriteOptions::default();
+
+    let info = preview::sprite::generate_sprite_sheet(&source_path, &output_path, duration_ms, &options)
+        .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;
+
+    // Generate VTT file
+    let sprite_filename = output_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{}.jpg", clip_id));
+    let vtt_content = preview::sprite::generate_vtt(&sprite_filename, duration_ms, &info);
+    let vtt_path = output_path.with_extension("vtt");
+    std::fs::write(&vtt_path, vtt_content)?;
+
+    // Save sprite metadata JSON (per phase-2.md spec)
+    let metadata = preview::sprite::SpriteMetadata::from(&info);
+    preview::sprite::save_sprite_metadata(&output_path, &metadata)
+        .map_err(|e| DadCamError::Other(format!("Failed to save sprite metadata: {}", e)))?;
+
+    let size = std::fs::metadata(&output_path)?.len() as i64;
+    let rel_path = preview::to_relative_path(library_root, &output_path);
+
+    if let Some(existing) = preview::find_derived_asset(conn, clip_id, "sprite")? {
+        preview::update_derived_asset(
+            conn,
+            existing.id,
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+    } else {
+        let asset_id = preview::create_derived_asset(
+            conn,
+            clip.library_id,
+            "sprite",
+            &rel_path,
+            size,
+            PIPELINE_VERSION,
+            &params.to_json(),
+        )?;
+        schema::link_clip_asset(conn, clip_id, asset_id, "sprite")?;
+    }
+
+    Ok(())
 }

@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.18
+Version: 0.1.22
 
 ---
 
@@ -85,6 +85,8 @@ Phase 2 - Previews:
 - dadcam preview [--type <proxy|thumb|sprite|all>] [--clip <id>] [--force]
 - dadcam preview-status [--missing-only]
 - dadcam invalidate [--type <all>] [--confirm]
+- dadcam cleanup [--scope <derived|orphans|all>] [--dedup] [--max-size-gb <n>] [--confirm]
+- dadcam check-tools [--download]
 
 Phase 4 - Scoring:
 - dadcam score [--clip <id>] [--force] [--verbose]
@@ -247,22 +249,63 @@ Sprite Sheet Generation
 Output: Tiled JPG strip for hover scrubbing
 FPS: 1 frame per second
 Tile width: 160px
-Max frames: 120 (2 minutes of video)
+Max frames: 600 (10 minutes of video)
+Frames per page: 60 (paging for long videos)
 
 FFmpeg command pattern:
 ```
 ffmpeg -i input.mts \
-  -vf "fps=1,scale=160:-1,tile=60x1" \
-  output.jpg
+  -vf "fps=1,scale=160:90,tile=10x6" \
+  -vframes 60 -q:v 2 output.jpg
 ```
 
 Features:
-- Single horizontal strip of frames
-- Metadata JSON stored alongside (frame_count, tile dimensions)
+- Tiled grid of frames (10 columns, up to 6 rows per page)
+- Multi-page sprites for videos longer than 60 seconds
+- Metadata JSON stored alongside (fps, tile_width, tile_height, frame_count, columns, rows, interval_ms, page_index, page_count)
+- WebVTT file generated for video player scrub preview
 - CSS/JS calculates tile position from hover percentage
 - Only generated for video clips (not audio/images)
 
 See docs/planning/phase-2.md for implementation details
+
+---
+
+Cleanup Command
+
+Removes orphaned derived files and manages storage.
+
+Scopes:
+- orphans: Files in derived directories not linked in database
+- derived: Duplicate derived assets (keep newest per clip/role)
+- all: Both orphans and derived
+
+Features:
+- Dry-run by default (use --confirm to actually delete)
+- --dedup flag removes duplicate derived assets per clip/role
+- --max-size-gb cap deletes oldest derived assets when exceeded
+- Reports freed space after cleanup
+
+Command pattern:
+```
+dadcam cleanup --scope all --dedup --max-size-gb 50 --confirm
+```
+
+---
+
+Check Tools Command
+
+Verifies required tools (ffmpeg, ffprobe, exiftool) are available.
+
+Features:
+- Shows tool status (OK/MISSING) and path
+- --download flag attempts to auto-download FFmpeg
+- ExifTool must be installed manually
+
+Command pattern:
+```
+dadcam check-tools --download
+```
 
 ---
 

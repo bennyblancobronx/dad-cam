@@ -13,6 +13,7 @@ mod metadata;
 mod ingest;
 mod jobs;
 mod camera;
+mod preview;
 
 use db::{open_db, get_db_path, init_library_folders};
 use db::schema::{self, Library};
@@ -91,6 +92,71 @@ enum Commands {
         #[arg(short, long)]
         library: Option<PathBuf>,
     },
+
+    /// Generate previews (proxies, thumbnails, sprites)
+    Preview {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Preview type to generate (proxy, thumb, sprite, all)
+        #[arg(long, default_value = "all")]
+        r#type: String,
+        /// Specific clip ID to process
+        #[arg(long)]
+        clip: Option<i64>,
+        /// Force regeneration even if up to date
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Show preview generation status
+    PreviewStatus {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Only show clips missing previews
+        #[arg(long)]
+        missing_only: bool,
+    },
+
+    /// Invalidate derived assets (force regeneration)
+    Invalidate {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Asset type to invalidate (proxy, thumb, sprite, all)
+        #[arg(long, default_value = "all")]
+        r#type: String,
+        /// Confirm invalidation without prompt
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Clean up orphaned files and deduplicate derived assets
+    Cleanup {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Scope of cleanup (derived, orphans, all)
+        #[arg(long, default_value = "all")]
+        scope: String,
+        /// Keep only the latest derived asset per clip/role
+        #[arg(long)]
+        dedup: bool,
+        /// Maximum size in GB for derived assets (delete oldest if exceeded)
+        #[arg(long)]
+        max_size_gb: Option<u64>,
+        /// Actually delete files (default is dry-run)
+        #[arg(long)]
+        confirm: bool,
+    },
+
+    /// Check and download required tools (ffmpeg, ffprobe)
+    CheckTools {
+        /// Download missing tools if possible
+        #[arg(long)]
+        download: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -103,6 +169,11 @@ fn main() -> Result<()> {
         Commands::Show { id, library } => cmd_show(id, library),
         Commands::Jobs { library, cancel, run, status } => cmd_jobs(library, cancel, run, status),
         Commands::RelinkScan { path, library } => cmd_relink_scan(path, library),
+        Commands::Preview { library, r#type, clip, force } => cmd_preview(library, r#type, clip, force),
+        Commands::PreviewStatus { library, missing_only } => cmd_preview_status(library, missing_only),
+        Commands::Invalidate { library, r#type, confirm } => cmd_invalidate(library, r#type, confirm),
+        Commands::Cleanup { library, scope, dedup, max_size_gb, confirm } => cmd_cleanup(library, scope, dedup, max_size_gb, confirm),
+        Commands::CheckTools { download } => cmd_check_tools(download),
     }
 }
 
@@ -539,4 +610,611 @@ fn format_size(bytes: i64) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+fn cmd_preview(library: Option<PathBuf>, preview_type: String, clip_id: Option<i64>, force: bool) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Determine which types to generate
+    let types: Vec<&str> = match preview_type.as_str() {
+        "all" => vec!["thumb", "proxy", "sprite"],
+        "proxy" => vec!["proxy"],
+        "thumb" => vec!["thumb"],
+        "sprite" => vec!["sprite"],
+        _ => anyhow::bail!("Unknown preview type: {}. Use proxy, thumb, sprite, or all.", preview_type),
+    };
+
+    // If a specific clip is requested, just queue jobs for that clip
+    if let Some(cid) = clip_id {
+        let clip = schema::get_clip(&conn, cid)?
+            .ok_or_else(|| anyhow::anyhow!("Clip {} not found", cid))?;
+
+        println!("Generating previews for clip {}: {}", cid, clip.title);
+
+        // If force, delete existing assets first
+        if force {
+            for role in &types {
+                if let Some(existing) = preview::find_derived_asset(&conn, cid, role)? {
+                    let old_path = library_root.join(&existing.path);
+                    let _ = std::fs::remove_file(&old_path);
+                    // Also remove VTT and JSON metadata for sprites
+                    if *role == "sprite" {
+                        let vtt_path = old_path.with_extension("vtt");
+                        let json_path = old_path.with_extension("json");
+                        let _ = std::fs::remove_file(&vtt_path);
+                        let _ = std::fs::remove_file(&json_path);
+                    }
+                }
+            }
+        }
+
+        // Queue jobs
+        for job_type in &types {
+            schema::insert_job(&conn, &schema::NewJob {
+                job_type: (*job_type).to_string(),
+                library_id: Some(lib.id),
+                clip_id: Some(cid),
+                asset_id: None,
+                priority: if *job_type == "thumb" { 8 } else if *job_type == "proxy" { 5 } else { 3 },
+                payload: "{}".to_string(),
+            })?;
+        }
+
+        // Run jobs immediately
+        let count = runner::run_all_jobs(&conn, &library_root)?;
+        println!("Completed {} preview jobs", count);
+
+        return Ok(());
+    }
+
+    // Queue jobs for all clips missing previews
+    let mut total_queued = 0;
+
+    for job_type in &types {
+        let clips = preview::get_clips_needing_previews(&conn, lib.id, job_type, 1000)?;
+
+        for clip in &clips {
+            schema::insert_job(&conn, &schema::NewJob {
+                job_type: (*job_type).to_string(),
+                library_id: Some(lib.id),
+                clip_id: Some(clip.id),
+                asset_id: None,
+                priority: if *job_type == "thumb" { 8 } else if *job_type == "proxy" { 5 } else { 3 },
+                payload: "{}".to_string(),
+            })?;
+            total_queued += 1;
+        }
+
+        if !clips.is_empty() {
+            println!("Queued {} {} jobs", clips.len(), job_type);
+        }
+    }
+
+    if total_queued == 0 {
+        println!("All clips have up-to-date previews.");
+        return Ok(());
+    }
+
+    println!();
+    println!("Running {} preview jobs...", total_queued);
+
+    let count = runner::run_all_jobs(&conn, &library_root)?;
+    println!("Completed {} preview jobs", count);
+
+    Ok(())
+}
+
+fn cmd_preview_status(library: Option<PathBuf>, missing_only: bool) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Get total clip count
+    let total_clips = schema::count_clips(&conn, lib.id)?;
+
+    // Count clips with each preview type
+    let has_proxy: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT clip_id) FROM clip_assets WHERE role = 'proxy'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let has_thumb: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT clip_id) FROM clip_assets WHERE role = 'thumb'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let has_sprite: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT clip_id) FROM clip_assets WHERE role = 'sprite'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    // Count pending jobs
+    let pending_proxy: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM jobs WHERE type = 'proxy' AND status = 'pending'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let pending_thumb: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM jobs WHERE type = 'thumb' AND status = 'pending'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let pending_sprite: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM jobs WHERE type = 'sprite' AND status = 'pending'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    println!("Preview Status for '{}'", lib.name);
+    println!("{}", "-".repeat(50));
+    println!("Total clips: {}", total_clips);
+    println!();
+    println!("{:>12}  {:>8}  {:>8}  {:>10}", "Type", "Have", "Missing", "Pending");
+    println!("{}", "-".repeat(50));
+
+    let missing_proxy = total_clips - has_proxy;
+    let missing_thumb = total_clips - has_thumb;
+    let missing_sprite = total_clips - has_sprite;
+
+    println!("{:>12}  {:>8}  {:>8}  {:>10}", "Thumbnails", has_thumb, missing_thumb, pending_thumb);
+    println!("{:>12}  {:>8}  {:>8}  {:>10}", "Proxies", has_proxy, missing_proxy, pending_proxy);
+    println!("{:>12}  {:>8}  {:>8}  {:>10}", "Sprites", has_sprite, missing_sprite, pending_sprite);
+
+    if missing_only {
+        println!();
+        println!("Clips missing previews:");
+
+        // List clips missing any preview
+        let mut stmt = conn.prepare(
+            r#"SELECT c.id, c.title, c.media_type
+               FROM clips c
+               WHERE c.library_id = ?1
+               AND NOT EXISTS (SELECT 1 FROM clip_assets ca WHERE ca.clip_id = c.id AND ca.role = 'thumb')
+               LIMIT 50"#
+        )?;
+
+        let missing: Vec<(i64, String, String)> = stmt.query_map([lib.id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        if missing.is_empty() {
+            println!("  None - all clips have thumbnails");
+        } else {
+            for (id, title, media_type) in &missing {
+                let display_title = if title.len() > 40 {
+                    format!("{}...", &title[..37])
+                } else {
+                    title.clone()
+                };
+                println!("  {:>6}  {:>8}  {}", id, media_type, display_title);
+            }
+            if missing.len() == 50 {
+                println!("  ... (showing first 50)");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_invalidate(library: Option<PathBuf>, asset_type: String, confirm: bool) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Determine which types to invalidate
+    let types: Vec<&str> = match asset_type.as_str() {
+        "all" => vec!["thumb", "proxy", "sprite"],
+        "proxy" => vec!["proxy"],
+        "thumb" => vec!["thumb"],
+        "sprite" => vec!["sprite"],
+        _ => anyhow::bail!("Unknown asset type: {}. Use proxy, thumb, sprite, or all.", asset_type),
+    };
+
+    // Count affected assets
+    let mut counts: Vec<(String, i64)> = Vec::new();
+    for role in &types {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clip_assets ca JOIN clips c ON c.id = ca.clip_id WHERE c.library_id = ?1 AND ca.role = ?2",
+            rusqlite::params![lib.id, role],
+            |row| row.get(0),
+        )?;
+        if count > 0 {
+            counts.push(((*role).to_string(), count));
+        }
+    }
+
+    if counts.is_empty() {
+        println!("No derived assets to invalidate.");
+        return Ok(());
+    }
+
+    println!("This will delete the following derived assets:");
+    for (role, count) in &counts {
+        println!("  {}: {} files", role, count);
+    }
+
+    if !confirm {
+        println!();
+        println!("Use --confirm to proceed with invalidation.");
+        return Ok(());
+    }
+
+    // Delete files and remove database records
+    let mut deleted = 0;
+
+    for role in &types {
+        // Get all assets of this type
+        let mut stmt = conn.prepare(
+            r#"SELECT a.id, a.path FROM assets a
+               JOIN clip_assets ca ON ca.asset_id = a.id
+               JOIN clips c ON c.id = ca.clip_id
+               WHERE c.library_id = ?1 AND ca.role = ?2"#
+        )?;
+
+        let assets: Vec<(i64, String)> = stmt.query_map(rusqlite::params![lib.id, role], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for (asset_id, path) in assets {
+            // Delete file
+            let full_path = library_root.join(&path);
+            let _ = std::fs::remove_file(&full_path);
+
+            // Delete VTT and JSON metadata for sprites
+            if *role == "sprite" {
+                let vtt_path = full_path.with_extension("vtt");
+                let json_path = full_path.with_extension("json");
+                let _ = std::fs::remove_file(&vtt_path);
+                let _ = std::fs::remove_file(&json_path);
+            }
+
+            // Remove clip_asset link
+            conn.execute(
+                "DELETE FROM clip_assets WHERE asset_id = ?1",
+                [asset_id],
+            )?;
+
+            // Remove asset record
+            conn.execute(
+                "DELETE FROM assets WHERE id = ?1",
+                [asset_id],
+            )?;
+
+            deleted += 1;
+        }
+    }
+
+    println!("Invalidated {} derived assets.", deleted);
+    println!();
+    println!("Run 'dadcam preview' to regenerate.");
+
+    Ok(())
+}
+
+fn cmd_cleanup(
+    library: Option<PathBuf>,
+    scope: String,
+    dedup: bool,
+    max_size_gb: Option<u64>,
+    confirm: bool,
+) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    let derived_dirs = ["proxies", "thumbs", "sprites"];
+    let mut orphan_files: Vec<(PathBuf, u64)> = Vec::new();
+    let mut duplicate_assets: Vec<(i64, String, u64)> = Vec::new(); // (asset_id, path, size)
+    let mut total_derived_size: u64 = 0;
+
+    // Build set of referenced paths from database
+    let mut referenced_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stmt = conn.prepare(
+        "SELECT path FROM assets WHERE library_id = ?1 AND type IN ('proxy', 'thumb', 'sprite')"
+    )?;
+    let paths: Vec<String> = stmt.query_map([lib.id], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+    for path in paths {
+        referenced_paths.insert(path);
+    }
+
+    // Scan derived directories for orphans
+    if scope == "orphans" || scope == "all" {
+        println!("Scanning for orphaned files...");
+
+        for dir_name in &derived_dirs {
+            let dir_path = library_root.join(constants::DADCAM_FOLDER).join(dir_name);
+            if !dir_path.exists() {
+                continue;
+            }
+
+            if let Ok(entries) = std::fs::read_dir(&dir_path) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let file_path = entry.path();
+                    if !file_path.is_file() {
+                        continue;
+                    }
+
+                    // Get relative path for comparison
+                    let rel_path = file_path
+                        .strip_prefix(&library_root)
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_default();
+
+                    let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    total_derived_size += file_size;
+
+                    // Check if this file is referenced in DB
+                    if !referenced_paths.contains(&rel_path) {
+                        // Also check for VTT files which are sidecars to sprites
+                        let is_vtt = file_path.extension().map(|e| e == "vtt").unwrap_or(false);
+                        if !is_vtt {
+                            orphan_files.push((file_path, file_size));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !orphan_files.is_empty() {
+            println!("Found {} orphaned files ({}):",
+                orphan_files.len(),
+                format_size(orphan_files.iter().map(|(_, s)| *s as i64).sum())
+            );
+            for (path, size) in &orphan_files {
+                let display = path.strip_prefix(&library_root)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| path.display().to_string());
+                println!("  {} ({})", display, format_size(*size as i64));
+            }
+        } else {
+            println!("No orphaned files found.");
+        }
+    }
+
+    // Find duplicate derived assets per (clip_id, role)
+    if dedup && (scope == "derived" || scope == "all") {
+        println!();
+        println!("Checking for duplicate derived assets...");
+
+        let mut stmt = conn.prepare(
+            r#"SELECT ca.clip_id, ca.role, a.id, a.path, a.size_bytes, a.created_at
+               FROM clip_assets ca
+               JOIN assets a ON a.id = ca.asset_id
+               JOIN clips c ON c.id = ca.clip_id
+               WHERE c.library_id = ?1 AND ca.role IN ('proxy', 'thumb', 'sprite')
+               ORDER BY ca.clip_id, ca.role, a.created_at DESC"#
+        )?;
+
+        let rows: Vec<(i64, String, i64, String, i64, String)> = stmt.query_map([lib.id], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            ))
+        })?.filter_map(|r| r.ok()).collect();
+
+        // Group by (clip_id, role) and find duplicates
+        let mut current_key: Option<(i64, String)> = None;
+        let mut first_in_group = true;
+
+        for (clip_id, role, asset_id, path, size, _created_at) in rows {
+            let key = (clip_id, role.clone());
+
+            if current_key.as_ref() != Some(&key) {
+                current_key = Some(key);
+                first_in_group = true;
+            } else {
+                first_in_group = false;
+            }
+
+            // Keep the first (newest) in each group, mark others as duplicates
+            if !first_in_group {
+                duplicate_assets.push((asset_id, path, size as u64));
+            }
+        }
+
+        if !duplicate_assets.is_empty() {
+            println!("Found {} duplicate assets ({}):",
+                duplicate_assets.len(),
+                format_size(duplicate_assets.iter().map(|(_, _, s)| *s as i64).sum())
+            );
+            for (_id, path, size) in &duplicate_assets {
+                println!("  {} ({})", path, format_size(*size as i64));
+            }
+        } else {
+            println!("No duplicate assets found.");
+        }
+    }
+
+    // Check size cap
+    let mut over_cap_assets: Vec<(i64, String, u64)> = Vec::new();
+    if let Some(max_gb) = max_size_gb {
+        let max_bytes = max_gb * 1024 * 1024 * 1024;
+
+        println!();
+        println!("Current derived asset size: {} (cap: {} GB)",
+            format_size(total_derived_size as i64),
+            max_gb
+        );
+
+        if total_derived_size > max_bytes {
+            let excess = total_derived_size - max_bytes;
+            println!("Exceeds cap by {}", format_size(excess as i64));
+
+            // Get oldest derived assets to delete
+            let mut stmt = conn.prepare(
+                r#"SELECT a.id, a.path, a.size_bytes
+                   FROM assets a
+                   JOIN clips c ON c.library_id = ?1
+                   JOIN clip_assets ca ON ca.asset_id = a.id AND ca.clip_id = c.id
+                   WHERE a.type IN ('proxy', 'thumb', 'sprite')
+                   ORDER BY a.created_at ASC"#
+            )?;
+
+            let rows: Vec<(i64, String, i64)> = stmt.query_map([lib.id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?.filter_map(|r| r.ok()).collect();
+
+            let mut freed: u64 = 0;
+            for (asset_id, path, size) in rows {
+                if freed >= excess {
+                    break;
+                }
+                // Don't delete assets already marked as duplicates
+                if !duplicate_assets.iter().any(|(id, _, _)| *id == asset_id) {
+                    over_cap_assets.push((asset_id, path, size as u64));
+                    freed += size as u64;
+                }
+            }
+
+            if !over_cap_assets.is_empty() {
+                println!("Would delete {} oldest assets to meet cap:", over_cap_assets.len());
+                for (_id, path, size) in &over_cap_assets {
+                    println!("  {} ({})", path, format_size(*size as i64));
+                }
+            }
+        }
+    }
+
+    // Summary
+    let total_to_delete = orphan_files.len() + duplicate_assets.len() + over_cap_assets.len();
+
+    if total_to_delete == 0 {
+        println!();
+        println!("Nothing to clean up.");
+        return Ok(());
+    }
+
+    if !confirm {
+        println!();
+        println!("Use --confirm to delete {} items.", total_to_delete);
+        return Ok(());
+    }
+
+    // Actually delete
+    println!();
+    println!("Cleaning up...");
+
+    let mut deleted_count = 0;
+    let mut freed_bytes: u64 = 0;
+
+    // Delete orphan files
+    for (path, size) in &orphan_files {
+        if std::fs::remove_file(path).is_ok() {
+            deleted_count += 1;
+            freed_bytes += size;
+        }
+    }
+
+    // Delete duplicate assets
+    for (asset_id, path, size) in &duplicate_assets {
+        let full_path = library_root.join(path);
+        let _ = std::fs::remove_file(&full_path);
+
+        // Remove from DB
+        conn.execute("DELETE FROM clip_assets WHERE asset_id = ?1", [asset_id])?;
+        conn.execute("DELETE FROM assets WHERE id = ?1", [asset_id])?;
+
+        deleted_count += 1;
+        freed_bytes += size;
+    }
+
+    // Delete over-cap assets
+    for (asset_id, path, size) in &over_cap_assets {
+        let full_path = library_root.join(path);
+        let _ = std::fs::remove_file(&full_path);
+
+        conn.execute("DELETE FROM clip_assets WHERE asset_id = ?1", [asset_id])?;
+        conn.execute("DELETE FROM assets WHERE id = ?1", [asset_id])?;
+
+        deleted_count += 1;
+        freed_bytes += size;
+    }
+
+    println!("Cleanup complete:");
+    println!("  Deleted: {} files", deleted_count);
+    println!("  Freed:   {}", format_size(freed_bytes as i64));
+
+    Ok(())
+}
+
+fn cmd_check_tools(download: bool) -> Result<()> {
+    println!("Checking required tools...");
+    println!();
+
+    let status = tools::check_tools();
+
+    println!("{:<12} {:<10} {}", "Tool", "Status", "Path");
+    println!("{}", "-".repeat(60));
+
+    let mut all_available = true;
+    for (name, available, path) in &status {
+        let status_str = if *available { "OK" } else { "MISSING" };
+        println!("{:<12} {:<10} {}", name, status_str, path);
+        if !available {
+            all_available = false;
+        }
+    }
+
+    if all_available {
+        println!();
+        println!("All tools available.");
+        return Ok(());
+    }
+
+    if !download {
+        println!();
+        println!("Some tools are missing. Use --download to attempt automatic download.");
+        return Ok(());
+    }
+
+    println!();
+    println!("Attempting to download missing tools...");
+
+    match tools::ensure_ffmpeg() {
+        Ok((ffmpeg, ffprobe)) => {
+            println!("FFmpeg downloaded to: {}", ffmpeg.display());
+            println!("FFprobe downloaded to: {}", ffprobe.display());
+        }
+        Err(e) => {
+            println!("Failed to download FFmpeg: {}", e);
+            println!();
+            println!("Please install FFmpeg manually:");
+            println!("  macOS:   brew install ffmpeg");
+            println!("  Windows: Download from https://ffmpeg.org/download.html");
+            println!("  Linux:   apt install ffmpeg (or equivalent)");
+        }
+    }
+
+    // Note: exiftool must be installed separately
+    if !tools::is_tool_available("exiftool") {
+        println!();
+        println!("ExifTool not found. Please install manually:");
+        println!("  macOS:   brew install exiftool");
+        println!("  Windows: Download from https://exiftool.org/");
+        println!("  Linux:   apt install libimage-exiftool-perl");
+    }
+
+    Ok(())
 }

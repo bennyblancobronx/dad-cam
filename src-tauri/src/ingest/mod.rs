@@ -258,7 +258,64 @@ fn process_single_file(
     // Mark ingest file as complete
     update_ingest_file_complete(conn, ingest_file_id, &dest_path, asset_id, clip_id)?;
 
+    // Queue background jobs for the new clip
+    queue_post_ingest_jobs(conn, clip_id, asset_id, library_id)?;
+
     Ok(Some(clip_id))
+}
+
+/// Queue jobs that should run after a clip is ingested:
+/// - hash_full: Full file hash for verification (per contracts.md)
+/// - preview jobs: thumb, proxy, sprite for UI display
+fn queue_post_ingest_jobs(
+    conn: &Connection,
+    clip_id: i64,
+    asset_id: i64,
+    library_id: i64,
+) -> Result<()> {
+    // Queue hash_full job for verification (contracts.md: verification after copy)
+    // Lower priority than preview jobs since verification can run in background
+    insert_job(conn, &NewJob {
+        job_type: "hash_full".to_string(),
+        library_id: Some(library_id),
+        clip_id: Some(clip_id),
+        asset_id: Some(asset_id),
+        priority: 2, // Low priority - background verification
+        payload: "{}".to_string(),
+    })?;
+
+    // Queue preview generation jobs (Phase 2)
+    // Thumbnails first (highest priority) - needed for UI
+    insert_job(conn, &NewJob {
+        job_type: "thumb".to_string(),
+        library_id: Some(library_id),
+        clip_id: Some(clip_id),
+        asset_id: None,
+        priority: 8, // High priority
+        payload: "{}".to_string(),
+    })?;
+
+    // Proxy for playback
+    insert_job(conn, &NewJob {
+        job_type: "proxy".to_string(),
+        library_id: Some(library_id),
+        clip_id: Some(clip_id),
+        asset_id: None,
+        priority: 5, // Medium priority
+        payload: "{}".to_string(),
+    })?;
+
+    // Sprite for hover scrubbing
+    insert_job(conn, &NewJob {
+        job_type: "sprite".to_string(),
+        library_id: Some(library_id),
+        clip_id: Some(clip_id),
+        asset_id: None,
+        priority: 3, // Lower priority
+        payload: "{}".to_string(),
+    })?;
+
+    Ok(())
 }
 
 /// Ingest a sidecar file and link it to a clip

@@ -4,6 +4,65 @@ This is the source of truth for version number.
 
 ---
 
+0.1.22 — Phase 2 Audit Verified
+
+- Independent audit confirmed all 28 Phase 2 checklist items pass
+- Core: proxy/thumb/sprite generation, deinterlace, audio proxy, sprite metadata JSON
+- Pipeline versioning: camera_profile_id, source_hash, staleness detection
+- Job system: auto-queue after ingest, error handling, idempotent execution
+- CLI: preview, preview-status, invalidate, cleanup, check-tools commands
+- Operational: atomic writes, sprite paging (60 frames/page), ffmpeg bundling
+- Updated techguide.md to 0.1.22 with cleanup/check-tools commands and sprite paging
+
+---
+
+0.1.21 — Sprite Metadata JSON
+
+- Added SpriteMetadata struct for JSON persistence alongside sprite images
+- Sprite metadata saved as .json file during sprite generation (per phase-2.md spec)
+- Added save_sprite_metadata and load_sprite_metadata functions to sprite.rs
+- Updated runner.rs to save sprite metadata JSON after generating sprites
+- Updated invalidate and cleanup commands to remove .json files alongside .vtt
+- Updated force regeneration in preview command to clean up .json files
+- Phase 2 audit now 100% complete (25/25 items)
+
+---
+
+0.1.20 — Phase 2 Complete (100%)
+
+- Implemented sprite paging for long videos (SPRITE_PAGE_COLS=60 frames per page)
+- Multi-page sprite sheets with generate_paged_sprite_sheets function
+- Multi-page VTT generation with generate_paged_vtt function
+- Added cleanup command for orphan files, dedup, and size cap enforcement
+- Cleanup supports: --scope (orphans/derived/all), --dedup, --max-size-gb, --confirm
+- Added check-tools command to verify/download ffmpeg, ffprobe, exiftool
+- Integrated ffmpeg-sidecar for automatic binary download when missing
+- Auto-queue hash_full job after ingest for file verification per contracts.md
+- Auto-queue preview jobs (thumb, proxy, sprite) after ingest
+- Updated SPRITE_MAX_FRAMES from 120 to 600 (10 minutes @ 1fps)
+- Tools module now checks ffmpeg-sidecar managed binaries before PATH fallback
+- Phase 2 audit now 100% complete (all 4 missing items implemented)
+
+---
+
+0.1.19 — Phase 2 Preview Pipeline Implemented
+
+- Added preview module with proxy, thumb, and sprite submodules
+- Proxy generation: H.264 720p videos with deinterlace detection, target FPS, LUT support
+- Thumbnail generation: JPG poster frames at 10% seek point, 480px max width
+- Sprite sheet generation: tiled JPG strips for hover scrubbing, WebVTT file output
+- DerivedParams struct tracks pipeline version, camera profile, source hash for invalidation
+- Job runner updated to process proxy, thumb, and sprite job types
+- CLI commands added: preview, preview-status, invalidate
+- Preview command queues and runs jobs for missing previews
+- Preview-status shows counts of generated vs missing previews
+- Invalidate command deletes derived assets and database records
+- Staleness checker handles all invalidation triggers per contracts.md
+- Atomic file writes with temp files and rename for crash safety
+- Project compiles clean with cargo check (39 warnings, 0 errors)
+
+---
+
 0.1.18 — Phase 1 Audit Verified
 
 - Independent audit confirmed all 19 Phase 1 checklist items pass
