@@ -1,0 +1,61 @@
+# Dad Cam App - .gitignore
+
+# Claude Code tooling (development environment)
+.claude/
+.claude-flow/
+.mcp.json
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Claude Code / MCP tooling (local runtime state)
+.claude-flow/daemon.log
+.claude-flow/daemon.pid
+.claude-flow/daemon-state.json
+.claude-flow/.trend-cache.json
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/neural/
+.claude-flow/*.tmp
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Tauri / Rust (when app is built)
+target/
+Cargo.lock
+*.rs.bk
+
+# Node / React (when app is built)
+node_modules/
+dist/
+build/
+*.local
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

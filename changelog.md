@@ -1,0 +1,251 @@
+Dad Cam App — Changelog
+
+This is the source of truth for version number.
+
+---
+
+0.1.14 — GitHub Prep
+
+- Added .gitignore for macOS, IDE, Tauri/Rust, Node/React, and runtime files
+- Added README.md with project overview and documentation index
+- Added LICENSE file (proprietary, all rights reserved)
+- Repository ready for initial commit
+
+---
+
+0.1.13 — Phase 8 Documentation Complete (100% Ready)
+
+- Phase 8 documentation audited and all gaps fixed
+- FIXED: Placeholder implementations for get_favorite_features, get_bad_clip_features, get_engaged_clip_features now have complete SQL queries and feature extraction
+- ADDED: Sample CLI output section (9.2) showing ml-analyze, ml-status, train-scoring, best-clips-ml example output
+- ADDED: Error handling section (Part 12.5) covering model load failures, corrupt video handling, partial analysis resume, user error messages
+- ADDED: FFmpeg frame extraction command pattern to techguide.md
+- ADDED: Error handling summary to techguide.md ML section
+- Phase 8 is now 100% documented and ready to code
+
+---
+
+0.1.12 — Phase 8 Implementation Guide
+
+- Created comprehensive Phase 8 implementation guide for ML and Intelligence
+- Guide covers: face detection, emotion/smile detection, voice activity detection, motion analysis, personalized scoring
+- Database schema: ml_analyses table for per-clip ML results (faces, emotions, speech, motion)
+- Database schema: user_interactions table for implicit feedback (views, watch time, skips, exports)
+- Database schema: scoring_models table for learned personalized weights
+- Technology stack: ONNX Runtime (ort crate) for all ML inference
+- Face detection: BlazeFace model via ONNX, frame extraction via FFmpeg
+- Emotion detection: emotion-ferplus-8.onnx model (8 emotions including happiness/smile)
+- Voice activity detection: Silero VAD model, speech segment timestamps
+- Motion analysis: FFmpeg optical flow, stability scoring, activity level classification
+- Personalized scoring: learns from favorites/bad tags and implicit behavior
+- Combined scoring: 40% heuristic + 40% ML + 20% personalized boost
+- CLI commands: ml-analyze, ml-status, train-scoring, best-clips-ml
+- Tauri commands for all Phase 8 operations
+- UI components: MlScoreBadge, MlInsightsPanel, MlAnalysisProgress, useViewTracking hook
+- All models run 100% offline (bundled with app per contracts.md)
+- Cross-platform: macOS, Windows, Linux support via ONNX Runtime
+- Testing workflow and verification checklist included
+- Deferred: GPU acceleration, face recognition, transcription, clustering, custom model training
+
+---
+
+0.1.11 — Phase 7 Documentation Complete (100% Ready)
+
+- Phase 7 documentation audited and all gaps fixed
+- ADDED: Phase 7 CLI commands to techguide.md (init-reference, batch-ingest, batch-export, relink, list-offline, list-presets, create-preset, delete-preset, volume-info)
+- ADDED: Pro Mode section to techguide.md covering reference mode, batch operations, relinking, codec presets
+- ADDED: Phase 7 Tauri commands to techguide.md command layer
+- ADDED: New job types (batch_ingest, batch_export, relink_scan) to techguide.md
+- ADDED: Explicit module registration in phase-7.md (batch, codec, reference, relink)
+- ADDED: Directory structure documentation for Phase 7 modules
+- Phase 7 is now 100% documented and ready to code
+
+---
+
+0.1.10 — Phase 7 Implementation Guide
+
+- Created comprehensive Phase 7 implementation guide for Pro Mode (Production Workflows)
+- Guide covers: reference mode (NAS workflows), batch operations, relinking, codec presets
+- Database schema: batch_operations, batch_ingest_sources, batch_export_items tables
+- Database schema: codec_presets table with system presets (share, archive, web, master)
+- Database schema: relink_sessions and relink_candidates tables for relink workflow
+- Reference mode module for NAS/network storage workflows (files stay in place)
+- Network path detection for macOS, Windows, and Linux
+- Batch ingest from multiple sources with unified progress tracking
+- Batch export of multiple recipes with sequential rendering
+- Relink module: scan paths, match by fingerprint (fast_hash, size_duration, filename)
+- Confidence-based relink matching (100% full hash, 95% fast hash, 80% size+duration, 50% filename)
+- Codec presets module with FFmpeg argument builder
+- CLI commands: init-reference, batch-ingest, batch-export, relink, list-presets, create-preset, volume-info, list-offline
+- Tauri commands for all Phase 7 operations
+- UI components: RelinkPanel, BatchProgress, VolumeBadge
+- Volume identity tracking surfaced in UI
+- Testing workflow and verification checklist included
+- Deferred: automatic relink on mount, batch pause/resume, custom filter chains, watch folders
+
+---
+
+0.1.9 — Phase 6 Documentation Complete (100% Ready)
+
+- Phase 6 documentation audited and all gaps fixed
+- ADDED: rerunExport TypeScript API function in Part 4.2
+- ADDED: rerun_export Tauri command in Part 6.1 with full implementation
+- ADDED: Part 3.6 FFmpeg Command References with H.264 and ProRes presets
+- ADDED: Part 3.7 Phase 5 Integration Bridge showing execute_export_job with progress tracking
+- ADDED: export-rerun CLI command and handler function in Part 7.1
+- FIXED: opener crate version updated to 0.7 (was 0.6)
+- FIXED: lazy_static dependency now declared in Part 3.3 where first used
+- FIXED: rerun_export registered in command handler list (Part 6.3)
+- Phase 6 is now 100% documented and ready to code
+
+---
+
+0.1.8 — Phase 6 Implementation Guide
+
+- Created comprehensive Phase 6 implementation guide for Export System
+- Guide covers: real-time progress tracking, export history UI, failure recovery
+- Database schema additions for progress tracking (frames_total, frames_completed, current_operation)
+- Database schema additions for output metadata (output_size_bytes, thumbnail_path)
+- Tauri event system for progress updates (export-progress event)
+- FFmpeg progress parser with frame count, elapsed time, and ETA calculation
+- Export History UI component with thumbnails, status badges, and file size display
+- Export Progress Card component with real-time updates
+- TypeScript types and API functions for export history operations
+- Error handling system with user-friendly error messages
+- Automatic cleanup of partial files on export failure
+- Cancel support with immediate process termination
+- Open folder/file functionality (cross-platform: macOS, Windows, Linux)
+- Thumbnail generation for completed exports
+- CLI commands: export-history, export-details, export-open
+- Testing workflow and verification checklist included
+- Deferred: resume partial exports, background notifications, export queue, cloud upload
+
+---
+
+0.1.7 — Phase 5 Implementation Guide (Audited)
+
+- Created comprehensive Phase 5 implementation guide for Auto-Edit Engine (VHS Mode)
+- Guide covers: export recipes, VHS edit generation, FFmpeg concat/crossfade pipeline
+- Database schema for export_recipes, export_runs, and export_run_items tables
+- Four selection modes: by_date, by_event, by_favorites, all (with score threshold)
+- Ordering options: chronological, score_desc, score_asc, shuffle
+- Crossfade transitions using FFmpeg xfade and acrossfade filters
+- Optional date overlays with configurable position and format
+- LUT support for nostalgic color grading (VHS Look, Film Stock)
+- Output presets: share (H.264) and archive (ProRes)
+- Full reproducibility: recipe snapshots and FFmpeg command logging
+- CLI commands: recipe-create, recipe-list, recipe-show, recipe-delete, export, export-list, export-show, export-rerun
+- Tauri commands for frontend integration (including delete_export_recipe, rerun_export)
+- UI components: ExportRecipeBuilder, ExportView with progress tracking
+- Testing workflow and verification checklist included
+- AUDITED: All gaps identified and fixed
+- ADDED: handle_export_rerun CLI handler with full implementation
+- ADDED: recipe-delete command with --force flag and confirmation prompt
+- ADDED: --event-folders CLI flag for by_event mode (comma-separated paths)
+- ADDED: Draft mode flag passed through CLI, job system, and render pipeline
+- ADDED: Complete LUT generation script (Python) and .cube file format documentation
+- ADDED: delete_export_recipe and rerun_export Tauri commands
+- ADDED: deleteExportRecipe, rerunExport TypeScript API functions
+- Deferred: J/L cuts, best segment pacing, music track integration, event folder UI browser
+
+---
+
+0.1.6 — Phase 4 Implementation Guide
+
+- Created comprehensive Phase 4 implementation guide for scoring engine
+- Guide covers: heuristic scoring (scene, audio, sharpness, motion), database schema, jobs, CLI, UI
+- FFmpeg-based analysis using scdet, ebur128, blurdetect, and frame differencing
+- Database schema for clip_scores and clip_score_overrides tables
+- User override system (promote/demote/pin) with effective score calculation
+- CLI commands: score, score-status, best-clips, score-override
+- Tauri commands for frontend integration
+- UI components: ScoreBadge, BestClipsView, ThresholdSlider, ScoreOverrideButtons
+- Score weights configurable via constants (scene 25%, audio 25%, sharpness 25%, motion 25%)
+- Pipeline versioning for automatic score invalidation and regeneration
+- Testing workflow and verification checklist included
+
+---
+
+0.1.5 — Phase 3 Implementation Guide
+
+- Created comprehensive Phase 3 implementation guide for desktop app shell
+- Guide covers: Tauri commands layer, TypeScript API wrapper, virtualized grid, sprite hover scrubbing
+- Tauri command pattern for SQLite integration (DbState, typed responses)
+- TanStack Virtual for high-performance clip grid (handles 1000+ clips at 60fps)
+- LRU thumbnail cache for memory-efficient image loading
+- Sprite sheet hover scrubbing with mouse position tracking
+- HTML5 video player with keyboard shortcuts
+- Filter bar with All/Favorites/Bad/Unreviewed filters
+- Search by filename, date range filtering, sort options
+- Tag toggle (Favorite/Bad) with optimistic UI updates
+- Complete React component structure with TypeScript types
+- Error boundaries, debounced search, request cancellation patterns
+- Testing workflow and performance verification checklist
+- Based on research: TanStack Virtual over react-window for dynamic content support
+
+---
+
+0.1.4 — Phase 2 Implementation Guide (Audited)
+
+- Created comprehensive Phase 2 implementation guide for preview pipeline
+- Guide covers: proxy generation (H.264 720p), thumbnail generation, sprite sheet generation
+- Includes pipeline versioning and invalidation system
+- Covers FFmpeg command patterns for each preview type
+- Adds new CLI commands: preview, preview-status, invalidate
+- Job integration for queuing and running preview generation
+- Complete code examples for preview module (proxy.rs, thumb.rs, sprite.rs)
+- Testing workflow and verification checklist included
+- AUDITED: All requirements from development-plan.md Phase 2 section verified
+- AUDITED: DerivedParams now includes camera_profile_id and source_hash per development-plan.md
+- AUDITED: Staleness checker handles all invalidation triggers (pipeline version, camera profile, LUT, source file)
+- DEFERRED: LUT management and best-frame heuristic documented for future phases
+
+---
+
+0.1.3 — Phase 1 Guide Complete (100% Coverage)
+
+- Added camera profile matcher module with JSON match rules and confidence scoring
+- Added sidecar ingestion (THM, XML, XMP, SRT files now copied and linked to clips)
+- Added volume identity tracking for cross-platform relink support
+- Added fingerprint generation (size_duration) for relink matching
+- Added per-file ingest state tracking for fine-grained crash recovery
+- Added job cancellation (dadcam jobs --cancel ID)
+- Added exponential backoff for job retries
+- Implemented relink-scan command (finds candidates by fingerprint)
+- Added missing constants (RECORDED_AT_STORAGE, DERIVED_PARAMS_HASH_ALGO, etc.)
+- Phase 1 guide now covers 100% of development-plan.md and contracts.md requirements
+
+---
+
+0.1.2 — Phase 1 Implementation Guide
+
+- Created comprehensive Phase 1 implementation guide for developers
+- Guide covers: project setup, database schema, migrations, job system, hashing, metadata extraction, file discovery, ingest pipeline, and CLI commands
+- All code examples follow Phase 0 contracts and decisions
+- Includes testing workflow and crash recovery verification steps
+
+---
+
+0.1.1 — Phase 0 Research Complete
+
+- Completed all Phase 0 research items
+- Chose Rust blake3 crate for hashing (3+ GB/s performance)
+- Chose ffmpeg-sidecar crate for video processing
+- Chose rusqlite with bundled feature for database
+- Decided Rust backend owns all core operations (DB, hashing, ffmpeg)
+- Documented cross-platform path strategy (relative paths in DB)
+- Researched existing tools (Video Hub App, Wwidd, Fast Video Cataloger)
+- Phase 0 is now complete, ready for Phase 1
+
+---
+
+0.1.0 — Phase 0 Foundation
+
+- Created contracts.md with 18 non-negotiable policies
+- Created phase-0.md with schema design, constants, and research checklist
+- Created techguide.md skeleton
+- Created changelog.md (this file)
+- Established library structure: one folder per library, .dadcam/ for derived assets
+- Locked in: BLAKE3 hashing, SQLite database, JSON camera profiles
+- Locked in: anything ffmpeg supports, audio/image outliers accepted
+- Locked in: originals never deleted, no cloud, cross-platform, crash-safe
