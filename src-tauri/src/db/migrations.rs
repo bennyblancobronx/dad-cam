@@ -186,6 +186,59 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_clip_tags_clip ON clip_tags(clip_id);
     CREATE INDEX idx_clip_tags_tag ON clip_tags(tag_id);
     "#,
+
+    // Migration 2: Scoring tables (Phase 4)
+    r#"
+    -- Clip scores table (machine-generated)
+    CREATE TABLE clip_scores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        clip_id INTEGER NOT NULL UNIQUE REFERENCES clips(id) ON DELETE CASCADE,
+
+        -- Overall score (weighted combination)
+        overall_score REAL NOT NULL CHECK (overall_score >= 0 AND overall_score <= 1),
+
+        -- Component scores (each 0-1)
+        scene_score REAL NOT NULL DEFAULT 0,
+        audio_score REAL NOT NULL DEFAULT 0,
+        sharpness_score REAL NOT NULL DEFAULT 0,
+        motion_score REAL NOT NULL DEFAULT 0,
+
+        -- Reasons array (JSON)
+        reasons TEXT NOT NULL DEFAULT '[]',
+
+        -- Versioning for invalidation
+        pipeline_version INTEGER NOT NULL,
+        scoring_version INTEGER NOT NULL DEFAULT 1,
+
+        -- Timestamps
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- User score overrides (human preference)
+    CREATE TABLE clip_score_overrides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        clip_id INTEGER NOT NULL UNIQUE REFERENCES clips(id) ON DELETE CASCADE,
+
+        -- Override type: 'promote' adds to score, 'demote' subtracts, 'pin' sets exact
+        override_type TEXT NOT NULL CHECK (override_type IN ('promote', 'demote', 'pin')),
+
+        -- For 'pin' type, this is the exact score. For promote/demote, this is the adjustment.
+        override_value REAL NOT NULL DEFAULT 0.2,
+
+        -- Optional note from user
+        note TEXT,
+
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Indexes
+    CREATE INDEX idx_clip_scores_overall ON clip_scores(overall_score DESC);
+    CREATE INDEX idx_clip_scores_clip ON clip_scores(clip_id);
+    CREATE INDEX idx_clip_scores_version ON clip_scores(pipeline_version);
+    CREATE INDEX idx_clip_score_overrides_clip ON clip_score_overrides(clip_id);
+    "#,
 ];
 
 /// Get current schema version from database

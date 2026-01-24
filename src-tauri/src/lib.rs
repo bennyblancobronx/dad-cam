@@ -10,6 +10,7 @@ pub mod ingest;
 pub mod jobs;
 pub mod camera;
 pub mod preview;
+pub mod scoring;
 pub mod commands;
 
 use std::path::PathBuf;
@@ -93,6 +94,14 @@ pub fn run() {
             commands::get_clip_view,
             commands::toggle_tag,
             commands::set_tag,
+            // Phase 4 scoring commands
+            commands::get_clip_score,
+            commands::score_clip,
+            commands::get_scoring_status,
+            commands::get_best_clips,
+            commands::set_score_override,
+            commands::clear_score_override,
+            commands::queue_scoring_jobs,
             // Ingest commands
             start_ingest,
             get_jobs,

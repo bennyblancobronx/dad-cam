@@ -60,6 +60,15 @@ pub enum DadCamError {
 
     #[error("{0}")]
     Other(String),
+
+    #[error("Scoring error: {0}")]
+    Scoring(String),
+}
+
+impl From<anyhow::Error> for DadCamError {
+    fn from(err: anyhow::Error) -> Self {
+        DadCamError::Other(err.to_string())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, DadCamError>;

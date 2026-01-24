@@ -4,10 +4,15 @@ version = "0.1.0"
 description = "A cross-platform video library for dad cam footage"
 authors = ["Dad Cam Team"]
 edition = "2021"
+default-run = "dad-cam"
 
 [lib]
 name = "dad_cam_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "dad-cam"
+path = "src/main.rs"
 
 [[bin]]
 name = "dadcam"

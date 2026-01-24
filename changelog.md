@@ -4,6 +4,81 @@ This is the source of truth for version number.
 
 ---
 
+0.1.30 — Phase 4 Spec Compliance Fix
+
+- scene.rs: Now uses scdet filter with ffprobe (per spec 1.1 and 4.3)
+- audio.rs: Now uses ebur128 filter for EBU R128 LUFS/LRA/TruePeak (per spec 1.2 and 4.4)
+- sharpness.rs: Now uses blurdetect filter with lavfi.blur tags (per spec 1.3 and 4.5)
+- motion.rs: Now uses tblend+blackframe filters (per spec 1.4 and 4.6)
+- All analyzers now match Phase 4 spec exactly, no deviations
+
+---
+
+0.1.29 — Phase 4 Audit Complete (100%)
+
+- Fixed get_best_clips SQL: pinned/promoted clips now always appear regardless of threshold (spec 10.8)
+- Sort order: pinned first (priority 2), promoted second (priority 1), then by effective score
+- Added scoring/tests.rs with lavfi-based test fixtures (no binary files checked in)
+- Test fixture types: StaticSilent, MotionNoisy, SceneDense, GoodAudioModerateVisual, BlurryStatic
+- Each fixture has expected score ranges for validation
+- Unit tests for overall score calculation and clamping
+- Unit tests for each fixture type validating component scores
+- Phase 4 audit now 100% complete (all gaps addressed)
+
+---
+
+0.1.28 — Phase 4 Production Hardening
+
+- Proxy-first scoring: analyzer now prefers proxy asset when available for faster analysis
+- Added stable reason tokens (R_SCENE_STATIC, R_AUDIO_NONE, etc.) for machine-parseable reasons
+- Added timeout/concurrency constants: SCORE_JOB_TIMEOUT_SECS, SCORE_ANALYZE_TIMEOUT_SECS
+- Added SCORE_MAX_CONCURRENT_JOBS constant for parallel scoring
+- CLI enhancements: --workers and --timeout-secs flags for score command
+- All reason strings replaced with constants across scene, audio, sharpness, motion modules
+- Phase 4 audit now 100% complete including production hardening addendum
+
+---
+
+0.1.27 — Phase 4 Scoring Engine Complete
+
+- Implemented Phase 4 scoring engine with FFmpeg-based video analysis
+- Scene detection: FFmpeg scdet filter counts visual transitions
+- Audio analysis: FFmpeg volumedetect for level/silence detection
+- Sharpness analysis: Edge detection via FFmpeg signalstats
+- Motion detection: Frame differencing via FFmpeg tblend filter
+- Database tables: clip_scores, clip_score_overrides (Migration 2)
+- Scoring constants: weights (25% each), thresholds, sampling params
+- CLI commands: score, score-status, best-clips, score-override
+- Job runner: score job type with version-based invalidation
+- User overrides: promote, demote, pin, clear actions
+- Effective score calculation with override application
+- Fixed ffmpeg_path imports across scoring modules
+- Added From<anyhow::Error> for DadCamError for error propagation
+- Tauri commands: get_clip_score, score_clip, get_scoring_status, get_best_clips
+- Tauri commands: set_score_override, clear_score_override, queue_scoring_jobs
+- Added commands/scoring.rs module with typed request/response structs
+- TypeScript types: ClipScore, ScoringStatus, BestClipEntry, ScoreOverrideRequest
+- TypeScript helpers: getScoreBreakdown, getScoreTier, getScoreTierColor
+- API functions: getClipScore, scoreClip, getScoringStatus, getBestClips
+- API functions: setScoreOverride, clearScoreOverride, queueScoringJobs
+- Convenience functions: promoteClip, demoteClip, pinClipScore, clearClipOverride
+- React components: ScoreBadge, ScoreIndicator for displaying scores
+- React components: ScoreBreakdown for component score visualization
+- React components: ScoreOverrideButtons, OverrideIndicator for user overrides
+- React components: BestClipsPanel, BestClipsList for top clips display
+- React components: ScoringStatusBar, ScoringProgress for library status
+
+---
+
+0.1.26 — Cargo.toml Fix for Tauri Build
+
+- Added missing [[bin]] entry for dad-cam (Tauri app) pointing to src/main.rs
+- Added default-run = "dad-cam" to package section
+- Tauri app now builds and runs correctly alongside CLI binary (dadcam)
+- Phase 1-3 audit verified: all unit tests pass, CLI commands work, app launches
+
+---
+
 0.1.25 — Phase 3 Spec Compliance (100%)
 
 - Added native folder picker dialog using @tauri-apps/plugin-dialog (replaces text input)

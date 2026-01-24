@@ -6,6 +6,7 @@ use crate::db::schema;
 use crate::jobs::{claim_job, complete_job, fail_job, heartbeat_job, reclaim_expired_jobs};
 use crate::ingest;
 use crate::preview;
+use crate::scoring;
 use crate::error::{DadCamError, Result};
 use crate::constants::PIPELINE_VERSION;
 
@@ -34,8 +35,9 @@ pub fn run_next_job(conn: &Connection, library_root: &Path) -> Result<bool> {
         "proxy" => run_proxy_job(conn, &job, library_root),
         "thumb" => run_thumb_job(conn, &job, library_root),
         "sprite" => run_sprite_job(conn, &job, library_root),
-        "score" | "export" | "ml" => {
-            // Phase 3+ jobs - not implemented yet
+        "score" => run_score_job(conn, &job, library_root),
+        "export" | "ml" => {
+            // Phase 5+ jobs - not implemented yet
             Err(DadCamError::Other(format!("Job type '{}' not yet implemented", job.job_type)))
         }
         _ => Err(DadCamError::Other(format!("Unknown job type: {}", job.job_type))),
@@ -390,6 +392,38 @@ fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> 
         )?;
         schema::link_clip_asset(conn, clip_id, asset_id, "sprite")?;
     }
+
+    Ok(())
+}
+
+/// Run a scoring job
+fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let clip_id = job.clip_id
+        .ok_or_else(|| DadCamError::Other("Score job has no clip_id".to_string()))?;
+
+    let clip = schema::get_clip(conn, clip_id)?
+        .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
+
+    // Check if already scored and up to date
+    if !scoring::analyzer::needs_scoring(conn, clip_id)? {
+        eprintln!("Clip {} already has up-to-date score", clip_id);
+        return Ok(());
+    }
+
+    // Run analysis
+    let result = scoring::analyzer::analyze_clip(conn, clip_id, library_root, false)?;
+
+    // Save the score
+    scoring::analyzer::save_clip_score(conn, &result)?;
+
+    eprintln!("Scored clip {}: {:.2} (scene={:.2}, audio={:.2}, sharp={:.2}, motion={:.2})",
+        clip_id,
+        result.overall_score,
+        result.scene_score,
+        result.audio_score,
+        result.sharpness_score,
+        result.motion_score
+    );
 
     Ok(())
 }

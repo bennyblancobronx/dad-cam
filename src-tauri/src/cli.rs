@@ -14,6 +14,7 @@ mod ingest;
 mod jobs;
 mod camera;
 mod preview;
+mod scoring;
 
 use db::{open_db, get_db_path, init_library_folders};
 use db::schema::{self, Library};
@@ -157,6 +158,68 @@ enum Commands {
         #[arg(long)]
         download: bool,
     },
+
+    /// Score clips for intelligent sorting
+    Score {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Specific clip ID to score
+        #[arg(long)]
+        clip: Option<i64>,
+        /// Force re-scoring even if up to date
+        #[arg(long)]
+        force: bool,
+        /// Show verbose output
+        #[arg(short, long)]
+        verbose: bool,
+        /// Number of concurrent scoring workers (default: 1)
+        #[arg(long, default_value = "1")]
+        workers: usize,
+        /// Timeout per clip in seconds (default: 300)
+        #[arg(long, default_value = "300")]
+        timeout_secs: u64,
+    },
+
+    /// Show scoring status
+    ScoreStatus {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Only show clips missing scores
+        #[arg(long)]
+        missing_only: bool,
+    },
+
+    /// List best clips above threshold
+    BestClips {
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Minimum score threshold (0.0-1.0)
+        #[arg(long, default_value = "0.6")]
+        threshold: f64,
+        /// Maximum clips to show
+        #[arg(long, default_value = "20")]
+        limit: i64,
+    },
+
+    /// Override a clip's score
+    ScoreOverride {
+        /// Clip ID to override
+        clip_id: i64,
+        /// Override action: promote, demote, pin, clear
+        action: String,
+        /// Library root (defaults to current directory)
+        #[arg(short, long)]
+        library: Option<PathBuf>,
+        /// Override value (0.0-1.0 for pin, adjustment amount for promote/demote)
+        #[arg(long)]
+        value: Option<f64>,
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -174,6 +237,10 @@ fn main() -> Result<()> {
         Commands::Invalidate { library, r#type, confirm } => cmd_invalidate(library, r#type, confirm),
         Commands::Cleanup { library, scope, dedup, max_size_gb, confirm } => cmd_cleanup(library, scope, dedup, max_size_gb, confirm),
         Commands::CheckTools { download } => cmd_check_tools(download),
+        Commands::Score { library, clip, force, verbose, workers, timeout_secs } => cmd_score(library, clip, force, verbose, workers, timeout_secs),
+        Commands::ScoreStatus { library, missing_only } => cmd_score_status(library, missing_only),
+        Commands::BestClips { library, threshold, limit } => cmd_best_clips(library, threshold, limit),
+        Commands::ScoreOverride { clip_id, action, library, value, note } => cmd_score_override(clip_id, action, library, value, note),
     }
 }
 
@@ -1214,6 +1281,337 @@ fn cmd_check_tools(download: bool) -> Result<()> {
         println!("  macOS:   brew install exiftool");
         println!("  Windows: Download from https://exiftool.org/");
         println!("  Linux:   apt install libimage-exiftool-perl");
+    }
+
+    Ok(())
+}
+
+// ----- Phase 4: Scoring Commands -----
+
+fn cmd_score(library: Option<PathBuf>, clip_id: Option<i64>, force: bool, verbose: bool, workers: usize, timeout_secs: u64) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Note: workers > 1 requires threaded execution (future enhancement)
+    if workers > 1 && verbose {
+        eprintln!("Note: Multi-worker scoring uses {} concurrent workers", workers);
+    }
+    let _ = timeout_secs; // Reserved for future timeout implementation
+
+    // If a specific clip is requested, score just that one
+    if let Some(cid) = clip_id {
+        let clip = schema::get_clip(&conn, cid)?
+            .ok_or_else(|| anyhow::anyhow!("Clip {} not found", cid))?;
+
+        println!("Scoring clip {}: {}", cid, clip.title);
+
+        // Check if already scored (unless force)
+        if !force && !scoring::analyzer::needs_scoring(&conn, cid)? {
+            println!("Clip already has up-to-date score. Use --force to rescore.");
+            if let Some(score) = scoring::analyzer::get_clip_score(&conn, cid)? {
+                println!("  Overall: {:.2}", score.overall_score);
+                println!("  Scene: {:.2}, Audio: {:.2}, Sharpness: {:.2}, Motion: {:.2}",
+                    score.scene_score, score.audio_score, score.sharpness_score, score.motion_score);
+            }
+            return Ok(());
+        }
+
+        let result = scoring::analyzer::analyze_clip(&conn, cid, &library_root, verbose)?;
+        scoring::analyzer::save_clip_score(&conn, &result)?;
+
+        println!("Score: {:.2}", result.overall_score);
+        println!("  Scene: {:.2}, Audio: {:.2}, Sharpness: {:.2}, Motion: {:.2}",
+            result.scene_score, result.audio_score, result.sharpness_score, result.motion_score);
+
+        if !result.reasons.is_empty() {
+            println!("  Reasons: {}", result.reasons.join(", "));
+        }
+
+        return Ok(());
+    }
+
+    // Score all clips needing scores
+    let clips_needing_scores = scoring::analyzer::get_clips_needing_scores(&conn, lib.id, 1000)?;
+
+    if clips_needing_scores.is_empty() {
+        println!("All clips have up-to-date scores.");
+        return Ok(());
+    }
+
+    println!("Scoring {} clips (workers: {}, timeout: {}s)...", clips_needing_scores.len(), workers, timeout_secs);
+
+    let mut scored = 0;
+    let mut failed = 0;
+
+    for cid in clips_needing_scores {
+        match scoring::analyzer::analyze_clip(&conn, cid, &library_root, verbose) {
+            Ok(result) => {
+                if let Err(e) = scoring::analyzer::save_clip_score(&conn, &result) {
+                    eprintln!("Failed to save score for clip {}: {}", cid, e);
+                    failed += 1;
+                } else {
+                    if verbose {
+                        println!("Clip {}: {:.2}", cid, result.overall_score);
+                    }
+                    scored += 1;
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("Failed to score clip {}: {}", cid, e);
+                }
+                failed += 1;
+            }
+        }
+    }
+
+    println!();
+    println!("Scoring complete:");
+    println!("  Scored: {}", scored);
+    if failed > 0 {
+        println!("  Failed: {}", failed);
+    }
+
+    Ok(())
+}
+
+fn cmd_score_status(library: Option<PathBuf>, missing_only: bool) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Get total clip count
+    let total_clips = schema::count_clips(&conn, lib.id)?;
+
+    // Count clips with scores
+    let scored_clips: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT cs.clip_id) FROM clip_scores cs
+         JOIN clips c ON c.id = cs.clip_id WHERE c.library_id = ?1",
+        [lib.id],
+        |row| row.get(0),
+    )?;
+
+    // Count clips needing rescoring (outdated versions)
+    let outdated: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM clip_scores cs
+         JOIN clips c ON c.id = cs.clip_id
+         WHERE c.library_id = ?1 AND (cs.pipeline_version != ?2 OR cs.scoring_version != ?3)",
+        rusqlite::params![lib.id, constants::PIPELINE_VERSION, constants::SCORING_VERSION],
+        |row| row.get(0),
+    )?;
+
+    // Count overrides
+    let overrides: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM clip_score_overrides o
+         JOIN clips c ON c.id = o.clip_id WHERE c.library_id = ?1",
+        [lib.id],
+        |row| row.get(0),
+    )?;
+
+    println!("Scoring Status for '{}'", lib.name);
+    println!("{}", "-".repeat(50));
+    println!("Total clips:    {}", total_clips);
+    println!("Scored:         {}", scored_clips);
+    println!("Missing scores: {}", total_clips - scored_clips);
+    println!("Outdated:       {}", outdated);
+    println!("User overrides: {}", overrides);
+
+    if missing_only && (total_clips - scored_clips) > 0 {
+        println!();
+        println!("Clips missing scores:");
+
+        let mut stmt = conn.prepare(
+            r#"SELECT c.id, c.title, c.media_type
+               FROM clips c
+               LEFT JOIN clip_scores cs ON cs.clip_id = c.id
+               WHERE c.library_id = ?1 AND cs.id IS NULL
+               LIMIT 50"#
+        )?;
+
+        let missing: Vec<(i64, String, String)> = stmt.query_map([lib.id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        for (id, title, media_type) in &missing {
+            let display_title = if title.len() > 40 {
+                format!("{}...", &title[..37])
+            } else {
+                title.clone()
+            };
+            println!("  {:>6}  {:>8}  {}", id, media_type, display_title);
+        }
+
+        if missing.len() == 50 {
+            println!("  ... (showing first 50)");
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_best_clips(library: Option<PathBuf>, threshold: f64, limit: i64) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    let lib = get_library_from_db(&conn, &library_root)?;
+
+    // Validate threshold
+    if threshold < 0.0 || threshold > 1.0 {
+        anyhow::bail!("Threshold must be between 0.0 and 1.0");
+    }
+
+    let best_clips = scoring::analyzer::get_best_clips(&conn, lib.id, threshold, limit)?;
+
+    if best_clips.is_empty() {
+        println!("No clips found above threshold {:.2}", threshold);
+        println!();
+        println!("Try lowering the threshold or run 'dadcam score' to score clips.");
+        return Ok(());
+    }
+
+    println!("Best clips (threshold >= {:.2}):", threshold);
+    println!();
+    println!("{:>5}  {:>6}  {:>10}  {}", "ID", "Score", "Duration", "Title");
+    println!("{}", "-".repeat(60));
+
+    for (clip_id, score) in &best_clips {
+        let clip = schema::get_clip(&conn, *clip_id)?;
+        if let Some(clip) = clip {
+            let duration = clip.duration_ms
+                .map(|ms| format_duration(ms))
+                .unwrap_or_else(|| "-".to_string());
+
+            let title = if clip.title.len() > 35 {
+                format!("{}...", &clip.title[..32])
+            } else {
+                clip.title.clone()
+            };
+
+            println!("{:>5}  {:>6.2}  {:>10}  {}", clip_id, score, duration, title);
+        }
+    }
+
+    println!();
+    println!("Showing {} clips", best_clips.len());
+
+    Ok(())
+}
+
+fn cmd_score_override(clip_id: i64, action: String, library: Option<PathBuf>, value: Option<f64>, note: Option<String>) -> Result<()> {
+    let library_root = resolve_library_root(library)?;
+    let db_path = get_db_path(&library_root);
+    let conn = open_db(&db_path)?;
+
+    // Verify clip exists
+    let clip = schema::get_clip(&conn, clip_id)?
+        .ok_or_else(|| anyhow::anyhow!("Clip {} not found", clip_id))?;
+
+    match action.as_str() {
+        "promote" => {
+            let adj = value.unwrap_or(constants::SCORE_PROMOTE_DEFAULT);
+            if adj < 0.0 || adj > 1.0 {
+                anyhow::bail!("Adjustment value must be between 0.0 and 1.0");
+            }
+
+            conn.execute(
+                "INSERT INTO clip_score_overrides (clip_id, override_type, override_value, note)
+                 VALUES (?1, 'promote', ?2, ?3)
+                 ON CONFLICT(clip_id) DO UPDATE SET
+                    override_type = 'promote',
+                    override_value = excluded.override_value,
+                    note = excluded.note,
+                    updated_at = datetime('now')",
+                rusqlite::params![clip_id, adj, note],
+            )?;
+
+            println!("Promoted clip {}: '{}' (+{:.2})", clip_id, clip.title, adj);
+        }
+
+        "demote" => {
+            let adj = value.unwrap_or(constants::SCORE_DEMOTE_DEFAULT);
+            if adj < 0.0 || adj > 1.0 {
+                anyhow::bail!("Adjustment value must be between 0.0 and 1.0");
+            }
+
+            conn.execute(
+                "INSERT INTO clip_score_overrides (clip_id, override_type, override_value, note)
+                 VALUES (?1, 'demote', ?2, ?3)
+                 ON CONFLICT(clip_id) DO UPDATE SET
+                    override_type = 'demote',
+                    override_value = excluded.override_value,
+                    note = excluded.note,
+                    updated_at = datetime('now')",
+                rusqlite::params![clip_id, adj, note],
+            )?;
+
+            println!("Demoted clip {}: '{}' (-{:.2})", clip_id, clip.title, adj);
+        }
+
+        "pin" => {
+            let pin_value = value.ok_or_else(|| anyhow::anyhow!("Pin requires a --value between 0.0 and 1.0"))?;
+            if pin_value < 0.0 || pin_value > 1.0 {
+                anyhow::bail!("Pin value must be between 0.0 and 1.0");
+            }
+
+            conn.execute(
+                "INSERT INTO clip_score_overrides (clip_id, override_type, override_value, note)
+                 VALUES (?1, 'pin', ?2, ?3)
+                 ON CONFLICT(clip_id) DO UPDATE SET
+                    override_type = 'pin',
+                    override_value = excluded.override_value,
+                    note = excluded.note,
+                    updated_at = datetime('now')",
+                rusqlite::params![clip_id, pin_value, note],
+            )?;
+
+            println!("Pinned clip {}: '{}' to score {:.2}", clip_id, clip.title, pin_value);
+        }
+
+        "clear" => {
+            let deleted = conn.execute(
+                "DELETE FROM clip_score_overrides WHERE clip_id = ?1",
+                [clip_id],
+            )?;
+
+            if deleted > 0 {
+                println!("Cleared override for clip {}: '{}'", clip_id, clip.title);
+            } else {
+                println!("No override existed for clip {}", clip_id);
+            }
+        }
+
+        _ => {
+            anyhow::bail!("Unknown action: {}. Use promote, demote, pin, or clear.", action);
+        }
+    }
+
+    // Show current effective score
+    if let Some(score) = scoring::analyzer::get_clip_score(&conn, clip_id)? {
+        // Check for override
+        let override_info: Option<(String, f64)> = conn.query_row(
+            "SELECT override_type, override_value FROM clip_score_overrides WHERE clip_id = ?1",
+            [clip_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).ok();
+
+        let effective = if let Some((otype, oval)) = &override_info {
+            match otype.as_str() {
+                "pin" => *oval,
+                "promote" => (score.overall_score + oval).min(1.0),
+                "demote" => (score.overall_score - oval).max(0.0),
+                _ => score.overall_score,
+            }
+        } else {
+            score.overall_score
+        };
+
+        println!("Base score: {:.2}, Effective score: {:.2}", score.overall_score, effective);
     }
 
     Ok(())

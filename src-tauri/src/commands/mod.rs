@@ -1,14 +1,16 @@
-// Dad Cam - Phase 3 Commands Module
+// Dad Cam - Commands Module
 // Tauri commands organized by domain
 
 pub mod library;
 pub mod clips;
 pub mod tags;
+pub mod scoring;
 
 // Re-export all commands for easy registration
 pub use library::*;
 pub use clips::*;
 pub use tags::*;
+pub use scoring::*;
 
 // Shared database state
 use std::sync::Mutex;
