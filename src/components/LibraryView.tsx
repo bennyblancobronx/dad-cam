@@ -2,6 +2,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ClipView, LibraryInfo, FilterType, SortField, SortOrder } from '../types/clips';
 import { getClipsFiltered, toggleTag, getLibraryRoot } from '../api/clips';
+import { open } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { setLibraryRoot } from '../utils/paths';
 import { clearThumbnailCache } from '../utils/thumbnailCache';
 import { ClipGrid } from './ClipGrid';
@@ -32,6 +34,10 @@ export function LibraryView({ library, onClose }: LibraryViewProps) {
 
   // Player state
   const [selectedClip, setSelectedClip] = useState<ClipView | null>(null);
+
+  // Import state
+  const [isImporting, setIsImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   // Request cancellation ref
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -183,6 +189,45 @@ export function LibraryView({ library, onClose }: LibraryViewProps) {
   // Get current clip index for navigation
   const currentClipIndex = selectedClip ? clips.findIndex(c => c.id === selectedClip.id) : -1;
 
+  // Handle import footage
+  const handleImport = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select Folder to Import',
+      });
+
+      if (!selected) return;
+
+      setIsImporting(true);
+      setImportStatus('Importing...');
+      setError(null);
+
+      const result = await invoke<{
+        jobId: number;
+        totalFiles: number;
+        processed: number;
+        skipped: number;
+        failed: number;
+        clipsCreated: number[];
+      }>('start_ingest', {
+        sourcePath: selected,
+        libraryPath: library.rootPath,
+      });
+
+      setImportStatus(`Imported ${result.processed} files (${result.skipped} skipped, ${result.failed} failed)`);
+
+      // Reload clips to show new imports
+      loadClips(true);
+    } catch (err) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Import failed');
+      setImportStatus(null);
+    } finally {
+      setIsImporting(false);
+    }
+  }, [library.rootPath, loadClips]);
+
   return (
     <div
       className="library-view"
@@ -207,19 +252,38 @@ export function LibraryView({ library, onClose }: LibraryViewProps) {
         <h1 style={{ color: 'white', margin: 0, fontSize: '20px' }}>
           {library.name}
         </h1>
-        <button
-          onClick={onClose}
-          style={{
-            padding: '6px 12px',
-            border: '1px solid #444',
-            borderRadius: '4px',
-            backgroundColor: '#2a2a2a',
-            color: 'white',
-            cursor: 'pointer',
-          }}
-        >
-          Close Library
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {importStatus && (
+            <span style={{ color: '#88ff88', fontSize: '14px' }}>{importStatus}</span>
+          )}
+          <button
+            onClick={handleImport}
+            disabled={isImporting}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid #446644',
+              borderRadius: '4px',
+              backgroundColor: isImporting ? '#1a2a1a' : '#2a3a2a',
+              color: isImporting ? '#668866' : '#88ff88',
+              cursor: isImporting ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {isImporting ? 'Importing...' : 'Import Footage'}
+          </button>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid #444',
+              borderRadius: '4px',
+              backgroundColor: '#2a2a2a',
+              color: 'white',
+              cursor: 'pointer',
+            }}
+          >
+            Close Library
+          </button>
+        </div>
       </div>
 
       {/* Filter Bar */}

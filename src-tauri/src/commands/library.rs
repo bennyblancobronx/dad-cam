@@ -66,8 +66,17 @@ pub fn close_library(state: State<DbState>) -> Result<(), String> {
 
 /// Create a new library
 #[tauri::command]
-pub fn create_library(path: String, name: String) -> Result<LibraryResponse, String> {
+pub fn create_library(state: State<DbState>, path: String, name: String) -> Result<LibraryResponse, String> {
     let library_path = PathBuf::from(&path);
+
+    // Validate the path exists and is a directory
+    if !library_path.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    if !library_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+
     let db_path = get_db_path(&library_path);
 
     if db_path.exists() {
@@ -75,21 +84,28 @@ pub fn create_library(path: String, name: String) -> Result<LibraryResponse, Str
     }
 
     // Create folder structure
-    init_library_folders(&library_path).map_err(|e| e.to_string())?;
+    init_library_folders(&library_path)
+        .map_err(|e| format!("Failed to create library folders: {}", e))?;
 
     // Open database
-    let conn = open_db(&db_path).map_err(|e| e.to_string())?;
+    let conn = open_db(&db_path)
+        .map_err(|e| format!("Failed to create database: {}", e))?;
 
     // Insert default camera profiles
-    camera::insert_default_profiles(&conn).map_err(|e| e.to_string())?;
+    camera::insert_default_profiles(&conn)
+        .map_err(|e| format!("Failed to insert camera profiles: {}", e))?;
 
     // Create library record
     let lib_id = schema::insert_library(&conn, &path, &name, constants::DEFAULT_INGEST_MODE)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("Failed to insert library record: {}", e))?;
 
     let lib = schema::get_library(&conn, lib_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Failed to create library".to_string())?;
+        .map_err(|e| format!("Failed to read library record: {}", e))?
+        .ok_or_else(|| format!("Library record not found after insert (id={})", lib_id))?;
+
+    // Store connection in state so it can be used after creation
+    let mut db = state.0.lock().map_err(|e| format!("Failed to acquire db lock: {}", e))?;
+    *db = Some(conn);
 
     Ok(LibraryResponse {
         id: lib.id,

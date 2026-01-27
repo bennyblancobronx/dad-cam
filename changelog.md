@@ -4,6 +4,18 @@ This is the source of truth for version number.
 
 ---
 
+0.1.31 — Library Creation Fix + Import UI
+
+- Fixed library creation bug: DbState now stored after create (connection was being dropped)
+- Added path validation: checks path exists and is directory before creating library
+- Improved error messages: each step now reports specific failure reason
+- Fixed frontend error handling: Tauri throws strings, not Error objects
+- Added Import Footage button to LibraryView header
+- Import opens native folder picker, runs ingest, reloads clip grid
+- Import shows status message with processed/skipped/failed counts
+
+---
+
 0.1.30 — Phase 4 Spec Compliance Fix
 
 - scene.rs: Now uses scdet filter with ffprobe (per spec 1.1 and 4.3)

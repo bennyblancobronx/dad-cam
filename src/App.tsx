@@ -39,7 +39,7 @@ function App() {
       setLibrary(lib);
       setLibraryPath(selected as string);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open library');
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open library');
     } finally {
       setIsLoading(false);
     }
@@ -77,7 +77,7 @@ function App() {
       setLibrary(lib);
       setShowCreateForm(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create library');
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to create library');
     } finally {
       setIsLoading(false);
     }
