@@ -4,6 +4,17 @@ This is the source of truth for version number.
 
 ---
 
+0.1.62 — Settings Page (Braun D.5.8)
+
+- Moved settings from modal to dedicated full page per Braun spec D.5.8
+- Created SettingsView.tsx with left nav (200px) + content area (640px max)
+- Updated LeftNav SettingsSection to be a navigation link
+- Updated LibraryView, LibraryDashboard, App.tsx for view-based routing
+- Removed modal-based SettingsPanel approach
+- Added settings-view CSS classes following Braun Design Language
+
+---
+
 0.1.61 — Braun Design CSS Fix
 
 - Fixed duration badge colors to use rgba(250, 250, 248, 1) instead of pure white

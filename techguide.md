@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.31
+Version: 0.1.62
 
 ---
 
@@ -473,6 +473,8 @@ Key Components:
 - VideoPlayer: HTML5 video with keyboard shortcuts
 - FilterBar: Filter buttons, search, date range, sort controls
 - LibraryView: Main library browser container
+- SettingsView: Full-page settings with left nav (200px) + content (640px max) per Braun D.5.8
+- LibraryDashboard: Pro mode multi-library selection grid
 
 Data Flow:
 ```

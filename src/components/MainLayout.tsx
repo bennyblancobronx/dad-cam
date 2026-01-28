@@ -3,13 +3,11 @@
 
 import type { ReactNode } from 'react';
 import type { LibraryInfo } from '../types/clips';
-import type { AppMode } from '../types/settings';
 import { LeftNav } from './LeftNav';
 
 interface MainLayoutProps {
   library: LibraryInfo;
-  mode: AppMode;
-  onOpenSettings: () => void;
+  onNavigateToSettings: () => void;
   onNavigateToEvent?: (eventId: number) => void;
   onNavigateToDate?: (date: string) => void;
   /** Currently active date for highlighting in nav */
@@ -24,8 +22,7 @@ interface MainLayoutProps {
 
 export function MainLayout({
   library,
-  mode,
-  onOpenSettings,
+  onNavigateToSettings,
   onNavigateToEvent,
   onNavigateToDate,
   activeDate,
@@ -37,8 +34,7 @@ export function MainLayout({
     <div className="main-layout">
       <LeftNav
         library={library}
-        mode={mode}
-        onOpenSettings={onOpenSettings}
+        onNavigateToSettings={onNavigateToSettings}
         onNavigateToEvent={onNavigateToEvent}
         onNavigateToDate={onNavigateToDate}
         activeDate={activeDate}

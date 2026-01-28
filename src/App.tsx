@@ -14,7 +14,7 @@ import {
 import { clearThumbnailCache } from './utils/thumbnailCache';
 import { LibraryView } from './components/LibraryView';
 import { LibraryDashboard } from './components/LibraryDashboard';
-import { SettingsPanel } from './components/SettingsPanel';
+import { SettingsView } from './components/SettingsView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
@@ -39,8 +39,8 @@ function App() {
   // Error recovery state
   const [unmountedLibrary, setUnmountedLibrary] = useState<UnmountedLibrary | null>(null);
 
-  // Settings panel state
-  const [showSettings, setShowSettings] = useState(false);
+  // App-level view state for Pro mode settings
+  const [showAppSettings, setShowAppSettings] = useState(false);
 
   // Load settings and auto-open library on mount
   useEffect(() => {
@@ -316,24 +316,30 @@ function App() {
     );
   }
 
-  // Pro mode: show Library Dashboard
+  // Pro mode: show Library Dashboard or Settings
   if (settings?.mode === 'pro') {
+    // Settings view (full page)
+    if (showAppSettings) {
+      return (
+        <ErrorBoundary>
+          <SettingsView
+            settings={settings}
+            onSettingsChange={setSettings}
+            onBack={() => setShowAppSettings(false)}
+          />
+        </ErrorBoundary>
+      );
+    }
+
+    // Library Dashboard
     return (
       <ErrorBoundary>
         <LibraryDashboard
           settings={settings}
           onLibrarySelect={setLibrary}
           onSettingsChange={setSettings}
-          onOpenSettings={() => setShowSettings(true)}
+          onNavigateToSettings={() => setShowAppSettings(true)}
         />
-        {/* Settings panel */}
-        {showSettings && (
-          <SettingsPanel
-            settings={settings}
-            onSettingsChange={setSettings}
-            onClose={() => setShowSettings(false)}
-          />
-        )}
       </ErrorBoundary>
     );
   }
@@ -486,7 +492,7 @@ function App() {
         {settings && (
           <button
             className="mode-indicator"
-            onClick={() => setShowSettings(true)}
+            onClick={() => setShowAppSettings(true)}
             style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
             Mode: {settings.mode === 'personal' ? 'Personal' : 'Pro'} (click to change)
@@ -497,7 +503,7 @@ function App() {
       {/* Settings button (gear icon) */}
       <button
         className="settings-button"
-        onClick={() => setShowSettings(true)}
+        onClick={() => setShowAppSettings(true)}
         aria-label="Open settings"
       >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -506,13 +512,15 @@ function App() {
         </svg>
       </button>
 
-      {/* Settings panel */}
-      {showSettings && settings && (
-        <SettingsPanel
-          settings={settings}
-          onSettingsChange={setSettings}
-          onClose={() => setShowSettings(false)}
-        />
+      {/* Settings view (full page overlay for Personal mode welcome screen) */}
+      {showAppSettings && settings && (
+        <div className="settings-overlay">
+          <SettingsView
+            settings={settings}
+            onSettingsChange={setSettings}
+            onBack={() => setShowAppSettings(false)}
+          />
+        </div>
       )}
     </div>
   );

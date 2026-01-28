@@ -19,14 +19,14 @@ interface LibraryDashboardProps {
   settings: AppSettings;
   onLibrarySelect: (library: LibraryInfo) => void;
   onSettingsChange: (settings: AppSettings) => void;
-  onOpenSettings: () => void;
+  onNavigateToSettings: () => void;
 }
 
 export function LibraryDashboard({
   settings,
   onLibrarySelect,
   onSettingsChange,
-  onOpenSettings,
+  onNavigateToSettings,
 }: LibraryDashboardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,7 +172,7 @@ export function LibraryDashboard({
         </div>
         <button
           className="settings-icon-button"
-          onClick={onOpenSettings}
+          onClick={onNavigateToSettings}
           aria-label="Open settings"
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">

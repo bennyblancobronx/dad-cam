@@ -598,6 +598,205 @@ select:focus-visible {
   width: 100%;
 }
 
+/* ===== Settings View (Full Page) - Braun spec D.5.8 ===== */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background-color: var(--color-canvas);
+}
+
+.settings-view {
+  min-height: 100vh;
+  background-color: var(--color-canvas);
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-view-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+}
+
+.settings-back-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-back-btn:hover {
+  background-color: var(--color-surface-elevated);
+  color: var(--color-text);
+}
+
+.settings-view-title {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.settings-view-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Settings Navigation - 200px per Braun spec */
+.settings-nav {
+  width: 200px;
+  flex-shrink: 0;
+  padding: var(--space-4);
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: all 0.2s;
+}
+
+.settings-nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+}
+
+.settings-nav-item.is-active {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+}
+
+.settings-nav-item svg {
+  flex-shrink: 0;
+}
+
+/* Settings Content - 640px max per Braun spec */
+.settings-content {
+  flex: 1;
+  padding: var(--space-8);
+  overflow-y: auto;
+  max-width: 640px;
+}
+
+.settings-content .settings-section {
+  margin-bottom: var(--space-12);
+}
+
+.settings-content .settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-content .settings-section-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--color-text);
+  text-transform: none;
+  letter-spacing: normal;
+  margin: 0 0 var(--space-2) 0;
+}
+
+.settings-content .settings-section-description {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-6) 0;
+}
+
+.settings-saving-indicator {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-top: var(--space-4);
+}
+
+/* Settings About Content */
+.settings-about-content {
+  color: var(--color-text);
+}
+
+.settings-version {
+  font-size: 17px;
+  font-weight: 500;
+  margin: 0 0 var(--space-1) 0;
+}
+
+.settings-tagline {
+  font-size: 15px;
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-4) 0;
+}
+
+.settings-about-details {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.settings-about-details p {
+  font-size: 14px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Nav Settings Link (LeftNav) */
+.nav-settings-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-3);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+}
+
+.nav-settings-link:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--color-text);
+}
+
+.nav-settings-label {
+  flex: 1;
+}
+
+.nav-settings-chevron {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
 /* ===== Library Dashboard (Pro Mode) ===== */
 
 .library-dashboard {
@@ -1142,41 +1341,11 @@ select:focus-visible {
   font-style: italic;
 }
 
-/* Settings section at bottom */
+/* Settings section at bottom of left nav */
 .nav-section-settings {
   margin-top: auto;
-  padding-top: var(--space-6);
+  padding-top: var(--space-4);
   border-top: 1px solid var(--color-border);
-}
-
-.nav-settings-content {
-  padding: var(--space-3);
-}
-
-.nav-settings-mode {
-  font-size: 13px;
-  font-weight: 300;
-  color: var(--color-text-muted);
-  margin-bottom: var(--space-3);
-}
-
-.nav-settings-button {
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background-color: transparent;
-  border: 1px solid var(--color-border-emphasis);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.nav-settings-button:hover {
-  background-color: var(--color-surface-elevated);
-  color: var(--color-text);
-  border-color: var(--color-text-muted);
 }
 
 /* Main content area */

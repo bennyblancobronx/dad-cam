@@ -13,7 +13,7 @@ import { ClipGrid } from './ClipGrid';
 import { FilterBar } from './FilterBar';
 import { VideoPlayer } from './VideoPlayer';
 import { WelcomeDashboard } from './WelcomeDashboard';
-import { SettingsPanel } from './SettingsPanel';
+import { SettingsView } from './SettingsView';
 import { EventView } from './EventView';
 import { DateView } from './DateView';
 import { AddToEventModal } from './modals/AddToEventModal';
@@ -40,7 +40,7 @@ function eventClipToClipView(eventClip: EventClipView): ClipView {
 }
 
 /** Current view within the library */
-type LibrarySubView = 'welcome' | 'clips' | 'stills' | 'event' | 'date';
+type LibrarySubView = 'welcome' | 'clips' | 'stills' | 'event' | 'date' | 'settings';
 
 interface LibraryViewProps {
   library: LibraryInfo;
@@ -67,8 +67,8 @@ export function LibraryView({
     mode === 'personal' ? 'welcome' : 'clips'
   );
 
-  // Settings panel state
-  const [showSettings, setShowSettings] = useState(false);
+  // Previous view for back navigation from settings
+  const [previousView, setPreviousView] = useState<LibrarySubView>('welcome');
 
   // Clips state
   const [clips, setClips] = useState<ClipView[]>([]);
@@ -315,6 +315,17 @@ export function LibraryView({
       loadClips(true);
     }
   }, [clips.length, loadClips]);
+
+  // Navigate to settings
+  const handleNavigateToSettings = useCallback(() => {
+    setPreviousView(currentView);
+    setCurrentView('settings');
+  }, [currentView]);
+
+  // Navigate back from settings
+  const handleBackFromSettings = useCallback(() => {
+    setCurrentView(previousView);
+  }, [previousView]);
 
   // Toggle clip selection
   const handleClipSelectionChange = useCallback((clipId: number) => {
@@ -587,12 +598,35 @@ export function LibraryView({
   const hasPrevious = canNavigateClips && currentClipIndex > 0;
   const hasNext = canNavigateClips && currentClipIndex < clips.length - 1;
 
+  // Settings view renders without MainLayout wrapper
+  if (currentView === 'settings' && settings && onSettingsChange) {
+    return (
+      <>
+        <SettingsView
+          settings={settings}
+          onSettingsChange={onSettingsChange}
+          onBack={handleBackFromSettings}
+        />
+        {/* Video Player Modal - available even in settings */}
+        {selectedClip && (
+          <VideoPlayer
+            clip={selectedClip}
+            onClose={() => setSelectedClip(null)}
+            onPrevious={hasPrevious ? handlePreviousClip : undefined}
+            onNext={hasNext ? handleNextClip : undefined}
+            onFavoriteToggle={() => handleTagToggle(selectedClip.id, 'favorite')}
+            onBadToggle={() => handleTagToggle(selectedClip.id, 'bad')}
+          />
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <MainLayout
         library={library}
-        mode={mode}
-        onOpenSettings={() => setShowSettings(true)}
+        onNavigateToSettings={handleNavigateToSettings}
         onNavigateToEvent={handleNavigateToEvent}
         onNavigateToDate={handleNavigateToDate}
         activeDate={selectedDate}
@@ -611,15 +645,6 @@ export function LibraryView({
           onNext={hasNext ? handleNextClip : undefined}
           onFavoriteToggle={() => handleTagToggle(selectedClip.id, 'favorite')}
           onBadToggle={() => handleTagToggle(selectedClip.id, 'bad')}
-        />
-      )}
-
-      {/* Settings Panel Modal */}
-      {showSettings && settings && onSettingsChange && (
-        <SettingsPanel
-          settings={settings}
-          onSettingsChange={onSettingsChange}
-          onClose={() => setShowSettings(false)}
         />
       )}
     </>
