@@ -239,6 +239,41 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_clip_scores_version ON clip_scores(pipeline_version);
     CREATE INDEX idx_clip_score_overrides_clip ON clip_score_overrides(clip_id);
     "#,
+
+    // Migration 3: Events system for clip organization (Phase 6)
+    r#"
+    -- Events table
+    CREATE TABLE events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        type TEXT NOT NULL CHECK (type IN ('date_range', 'clip_selection')),
+        -- For date_range type
+        date_start TEXT,
+        date_end TEXT,
+        -- Metadata
+        color TEXT DEFAULT '#3b82f6',
+        icon TEXT DEFAULT 'calendar',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Event clips (for clip_selection type, or manual additions to date_range)
+    CREATE TABLE event_clips (
+        event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        clip_id INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+        added_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (event_id, clip_id)
+    );
+
+    -- Indexes
+    CREATE INDEX idx_events_library ON events(library_id);
+    CREATE INDEX idx_events_type ON events(type);
+    CREATE INDEX idx_events_date_range ON events(date_start, date_end);
+    CREATE INDEX idx_event_clips_event ON event_clips(event_id);
+    CREATE INDEX idx_event_clips_clip ON event_clips(clip_id);
+    "#,
 ];
 
 /// Get current schema version from database

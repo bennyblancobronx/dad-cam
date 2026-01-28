@@ -79,11 +79,11 @@ export function FilterBar({
     onDateRangeChange(undefined, undefined);
   }, [onDateRangeChange]);
 
-  const filterButtons: { value: FilterType; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'favorites', label: 'Favorites' },
-    { value: 'bad', label: 'Bad' },
-    { value: 'unreviewed', label: 'Unreviewed' },
+  const filterButtons: { value: FilterType; label: string; title: string }[] = [
+    { value: 'all', label: 'All', title: 'Show all clips' },
+    { value: 'favorites', label: 'Favorites', title: 'Show favorited clips only' },
+    { value: 'bad', label: 'Bad', title: 'Show clips marked as bad' },
+    { value: 'unreviewed', label: 'Unreviewed', title: 'Show clips not yet reviewed' },
   ];
 
   const sortOptions: { value: SortField; label: string }[] = [
@@ -109,7 +109,7 @@ export function FilterBar({
     >
       {/* Filter buttons */}
       <div style={{ display: 'flex', gap: '4px' }}>
-        {filterButtons.map(({ value, label }) => (
+        {filterButtons.map(({ value, label, title }) => (
           <button
             key={value}
             onClick={() => onFilterChange(value)}
@@ -122,6 +122,7 @@ export function FilterBar({
               color: filter === value ? 'white' : '#ccc',
               fontSize: '13px',
             }}
+            title={title}
           >
             {label}
           </button>

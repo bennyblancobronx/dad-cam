@@ -63,6 +63,12 @@ pub enum DadCamError {
 
     #[error("Scoring error: {0}")]
     Scoring(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Event not found: {0}")]
+    EventNotFound(i64),
 }
 
 impl From<anyhow::Error> for DadCamError {

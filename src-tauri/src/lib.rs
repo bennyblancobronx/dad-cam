@@ -81,6 +81,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
         .manage(DbState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             // Phase 3 commands from commands module
@@ -102,6 +103,28 @@ pub fn run() {
             commands::set_score_override,
             commands::clear_score_override,
             commands::queue_scoring_jobs,
+            // App settings commands
+            commands::get_app_settings,
+            commands::save_app_settings,
+            commands::get_mode,
+            commands::set_mode,
+            commands::add_recent_library,
+            commands::remove_recent_library,
+            commands::get_recent_libraries,
+            commands::validate_library_path,
+            // Stills export command
+            commands::export_still,
+            // Events commands (Phase 6)
+            commands::create_event,
+            commands::get_events,
+            commands::get_event,
+            commands::update_event,
+            commands::delete_event,
+            commands::add_clips_to_event,
+            commands::remove_clips_from_event,
+            commands::get_event_clips,
+            commands::get_clips_grouped_by_date,
+            commands::get_clips_by_date,
             // Ingest commands
             start_ingest,
             get_jobs,

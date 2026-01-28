@@ -8,9 +8,12 @@ interface ClipThumbnailProps {
   clip: ClipView;
   width: number;
   height: number;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onFavoriteToggle: () => void;
   onBadToggle: () => void;
+  /** Selection mode */
+  selectionMode?: boolean;
+  isSelected?: boolean;
 }
 
 export function ClipThumbnail({
@@ -20,6 +23,8 @@ export function ClipThumbnail({
   onClick,
   onFavoriteToggle,
   onBadToggle,
+  selectionMode = false,
+  isSelected = false,
 }: ClipThumbnailProps) {
   const [isHovering, setIsHovering] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -197,8 +202,50 @@ export function ClipThumbnail({
         </div>
       </div>
 
+      {/* Selection checkbox */}
+      {selectionMode && (
+        <div
+          className="clip-card-checkbox"
+          style={{
+            position: 'absolute',
+            top: '8px',
+            left: '8px',
+            zIndex: 10,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => {}}
+            tabIndex={-1}
+            style={{
+              width: '20px',
+              height: '20px',
+              accentColor: '#fafaf8',
+              cursor: 'pointer',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Selection indicator */}
+      {isSelected && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            border: '2px solid #fafaf8',
+            borderRadius: '8px',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
+
       {/* Hover indicator */}
-      {isHovering && (
+      {isHovering && !isSelected && (
         <div
           style={{
             position: 'absolute',

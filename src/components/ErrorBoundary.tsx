@@ -1,4 +1,5 @@
 // Dad Cam - Phase 3 Error Boundary Component
+// Uses Braun Design Language tokens
 import { Component, ReactNode } from 'react';
 
 interface Props {
@@ -30,40 +31,14 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         this.props.fallback || (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: '100vh',
-            backgroundColor: '#0f0f0f',
-            color: 'white',
-            padding: '20px',
-          }}>
-            <h2 style={{ color: '#ff6666', marginBottom: '16px' }}>Something went wrong</h2>
-            <pre style={{
-              backgroundColor: '#1a1a1a',
-              padding: '16px',
-              borderRadius: '8px',
-              maxWidth: '600px',
-              overflow: 'auto',
-              color: '#888',
-              fontSize: '13px',
-            }}>
+          <div className="error-boundary">
+            <h2 className="error-boundary-title">Something went wrong</h2>
+            <pre className="error-boundary-message">
               {this.state.error?.message}
             </pre>
             <button
+              className="primary-button error-boundary-button"
               onClick={this.handleReset}
-              style={{
-                marginTop: '24px',
-                padding: '10px 20px',
-                backgroundColor: '#4a9eff',
-                border: 'none',
-                borderRadius: '4px',
-                color: 'white',
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
             >
               Try Again
             </button>

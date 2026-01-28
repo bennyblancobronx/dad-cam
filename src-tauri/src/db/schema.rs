@@ -832,3 +832,347 @@ pub fn update_clip_camera_profile(conn: &Connection, clip_id: i64, camera_profil
     )?;
     Ok(())
 }
+
+// ----- Events (Phase 6) -----
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Event {
+    pub id: i64,
+    pub library_id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub event_type: String,
+    pub date_start: Option<String>,
+    pub date_end: Option<String>,
+    pub color: String,
+    pub icon: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewEvent {
+    pub library_id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub event_type: String,
+    pub date_start: Option<String>,
+    pub date_end: Option<String>,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventUpdate {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub date_start: Option<String>,
+    pub date_end: Option<String>,
+    pub color: Option<String>,
+    pub icon: Option<String>,
+}
+
+/// Insert a new event
+pub fn insert_event(conn: &Connection, event: &NewEvent) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO events (library_id, name, description, type, date_start, date_end, color, icon)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(?7, '#3b82f6'), COALESCE(?8, 'calendar'))",
+        params![
+            event.library_id,
+            event.name,
+            event.description,
+            event.event_type,
+            event.date_start,
+            event.date_end,
+            event.color,
+            event.icon,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Get event by ID
+pub fn get_event(conn: &Connection, id: i64) -> Result<Option<Event>> {
+    let result = conn.query_row(
+        "SELECT id, library_id, name, description, type, date_start, date_end, color, icon, created_at, updated_at
+         FROM events WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(Event {
+                id: row.get(0)?,
+                library_id: row.get(1)?,
+                name: row.get(2)?,
+                description: row.get(3)?,
+                event_type: row.get(4)?,
+                date_start: row.get(5)?,
+                date_end: row.get(6)?,
+                color: row.get(7)?,
+                icon: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        },
+    ).optional()?;
+    Ok(result)
+}
+
+/// List all events for a library
+pub fn list_events(conn: &Connection, library_id: i64) -> Result<Vec<Event>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, library_id, name, description, type, date_start, date_end, color, icon, created_at, updated_at
+         FROM events WHERE library_id = ?1
+         ORDER BY created_at DESC"
+    )?;
+
+    let events = stmt.query_map(params![library_id], |row| {
+        Ok(Event {
+            id: row.get(0)?,
+            library_id: row.get(1)?,
+            name: row.get(2)?,
+            description: row.get(3)?,
+            event_type: row.get(4)?,
+            date_start: row.get(5)?,
+            date_end: row.get(6)?,
+            color: row.get(7)?,
+            icon: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(events)
+}
+
+/// Update an event
+pub fn update_event(conn: &Connection, id: i64, updates: &EventUpdate) -> Result<()> {
+    let mut set_clauses = vec!["updated_at = datetime('now')".to_string()];
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(ref name) = updates.name {
+        set_clauses.push(format!("name = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(name.clone()));
+    }
+    if let Some(ref desc) = updates.description {
+        set_clauses.push(format!("description = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(desc.clone()));
+    }
+    if let Some(ref date_start) = updates.date_start {
+        set_clauses.push(format!("date_start = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(date_start.clone()));
+    }
+    if let Some(ref date_end) = updates.date_end {
+        set_clauses.push(format!("date_end = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(date_end.clone()));
+    }
+    if let Some(ref color) = updates.color {
+        set_clauses.push(format!("color = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(color.clone()));
+    }
+    if let Some(ref icon) = updates.icon {
+        set_clauses.push(format!("icon = ?{}", params_vec.len() + 1));
+        params_vec.push(Box::new(icon.clone()));
+    }
+
+    params_vec.push(Box::new(id));
+    let id_param = params_vec.len();
+
+    let sql = format!(
+        "UPDATE events SET {} WHERE id = ?{}",
+        set_clauses.join(", "),
+        id_param
+    );
+
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, params_refs.as_slice())?;
+    Ok(())
+}
+
+/// Delete an event
+pub fn delete_event(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM events WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// Add clips to an event
+pub fn add_clips_to_event(conn: &Connection, event_id: i64, clip_ids: &[i64]) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "INSERT OR IGNORE INTO event_clips (event_id, clip_id) VALUES (?1, ?2)"
+    )?;
+    for clip_id in clip_ids {
+        stmt.execute(params![event_id, clip_id])?;
+    }
+    Ok(())
+}
+
+/// Remove clips from an event
+pub fn remove_clips_from_event(conn: &Connection, event_id: i64, clip_ids: &[i64]) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "DELETE FROM event_clips WHERE event_id = ?1 AND clip_id = ?2"
+    )?;
+    for clip_id in clip_ids {
+        stmt.execute(params![event_id, clip_id])?;
+    }
+    Ok(())
+}
+
+/// Get clip IDs for an event (explicit + date range)
+pub fn get_event_clip_ids(conn: &Connection, event_id: i64) -> Result<Vec<i64>> {
+    // First get the event to check its type
+    let event = get_event(conn, event_id)?
+        .ok_or_else(|| DadCamError::NotFound(format!("Event {} not found", event_id)))?;
+
+    let mut clip_ids: Vec<i64> = Vec::new();
+
+    // Get explicitly added clips
+    let mut stmt = conn.prepare(
+        "SELECT clip_id FROM event_clips WHERE event_id = ?1"
+    )?;
+    let explicit_ids: Vec<i64> = stmt.query_map(params![event_id], |row| row.get(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    clip_ids.extend(explicit_ids);
+
+    // For date_range events, also get clips within the date range
+    if event.event_type == "date_range" {
+        if let (Some(start), Some(end)) = (&event.date_start, &event.date_end) {
+            let mut range_stmt = conn.prepare(
+                "SELECT id FROM clips
+                 WHERE library_id = ?1
+                 AND date(recorded_at) >= date(?2)
+                 AND date(recorded_at) <= date(?3)
+                 AND id NOT IN (SELECT clip_id FROM event_clips WHERE event_id = ?4)"
+            )?;
+            let range_ids: Vec<i64> = range_stmt.query_map(
+                params![event.library_id, start, end, event_id],
+                |row| row.get(0)
+            )?.collect::<std::result::Result<Vec<_>, _>>()?;
+            clip_ids.extend(range_ids);
+        }
+    }
+
+    Ok(clip_ids)
+}
+
+/// Get clip count for an event
+pub fn get_event_clip_count(conn: &Connection, event_id: i64) -> Result<i64> {
+    let clip_ids = get_event_clip_ids(conn, event_id)?;
+    Ok(clip_ids.len() as i64)
+}
+
+/// Get clips for an event with pagination (optimized with SQL LIMIT/OFFSET)
+pub fn get_event_clips(conn: &Connection, event_id: i64, limit: i64, offset: i64) -> Result<Vec<Clip>> {
+    // Get the event to check its type
+    let event = get_event(conn, event_id)?
+        .ok_or_else(|| DadCamError::NotFound(format!("Event {} not found", event_id)))?;
+
+    // For date_range events with valid dates, include clips from date range
+    if event.event_type == "date_range" {
+        if let (Some(ref start), Some(ref end)) = (&event.date_start, &event.date_end) {
+            // Combine explicit clips with date range clips
+            let mut stmt = conn.prepare(
+                "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
+                        duration_ms, width, height, fps, codec, audio_codec, audio_channels,
+                        audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
+                        timestamp_source, source_folder, created_at
+                 FROM clips
+                 WHERE id IN (SELECT clip_id FROM event_clips WHERE event_id = ?1)
+                    OR (library_id = ?2 AND date(recorded_at) >= date(?3) AND date(recorded_at) <= date(?4))
+                 ORDER BY recorded_at DESC, created_at DESC
+                 LIMIT ?5 OFFSET ?6"
+            )?;
+            let clips = stmt.query_map(
+                params![event_id, event.library_id, start, end, limit, offset],
+                map_clip
+            )?.collect::<std::result::Result<Vec<_>, _>>()?;
+            return Ok(clips);
+        }
+    }
+
+    // For clip_selection events or date_range without dates - only explicit clips
+    let mut stmt = conn.prepare(
+        "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
+                duration_ms, width, height, fps, codec, audio_codec, audio_channels,
+                audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
+                timestamp_source, source_folder, created_at
+         FROM clips
+         WHERE id IN (SELECT clip_id FROM event_clips WHERE event_id = ?1)
+         ORDER BY recorded_at DESC, created_at DESC
+         LIMIT ?2 OFFSET ?3"
+    )?;
+    let clips = stmt.query_map(
+        params![event_id, limit, offset],
+        map_clip
+    )?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(clips)
+}
+
+fn map_clip(row: &rusqlite::Row) -> rusqlite::Result<Clip> {
+    Ok(Clip {
+        id: row.get(0)?,
+        library_id: row.get(1)?,
+        original_asset_id: row.get(2)?,
+        camera_profile_id: row.get(3)?,
+        media_type: row.get(4)?,
+        title: row.get(5)?,
+        duration_ms: row.get(6)?,
+        width: row.get(7)?,
+        height: row.get(8)?,
+        fps: row.get(9)?,
+        codec: row.get(10)?,
+        audio_codec: row.get(11)?,
+        audio_channels: row.get(12)?,
+        audio_sample_rate: row.get(13)?,
+        recorded_at: row.get(14)?,
+        recorded_at_offset_minutes: row.get(15)?,
+        recorded_at_is_estimated: row.get(16)?,
+        timestamp_source: row.get(17)?,
+        source_folder: row.get(18)?,
+        created_at: row.get(19)?,
+    })
+}
+
+/// Get clips grouped by date
+pub fn get_clips_grouped_by_date(conn: &Connection, library_id: i64) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT date(recorded_at) as clip_date, COUNT(*) as clip_count
+         FROM clips
+         WHERE library_id = ?1 AND recorded_at IS NOT NULL
+         GROUP BY clip_date
+         ORDER BY clip_date DESC"
+    )?;
+
+    let groups = stmt.query_map(params![library_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(groups)
+}
+
+/// Get clips for a specific date
+pub fn get_clips_by_date(conn: &Connection, library_id: i64, date: &str, limit: i64, offset: i64) -> Result<Vec<Clip>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
+                duration_ms, width, height, fps, codec, audio_codec, audio_channels,
+                audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
+                timestamp_source, source_folder, created_at
+         FROM clips
+         WHERE library_id = ?1 AND date(recorded_at) = date(?2)
+         ORDER BY recorded_at DESC
+         LIMIT ?3 OFFSET ?4"
+    )?;
+
+    let clips = stmt.query_map(params![library_id, date, limit, offset], map_clip)?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    Ok(clips)
+}
+
+/// Count clips for a specific date
+pub fn count_clips_by_date(conn: &Connection, library_id: i64, date: &str) -> Result<i64> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM clips WHERE library_id = ?1 AND date(recorded_at) = date(?2)",
+        params![library_id, date],
+        |row| row.get(0),
+    )?;
+    Ok(count)
+}

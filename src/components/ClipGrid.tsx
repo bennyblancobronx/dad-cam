@@ -16,6 +16,12 @@ interface ClipGridProps {
   columnCount?: number;
   itemHeight?: number;
   gap?: number;
+  /** Selection mode props */
+  selectionMode?: boolean;
+  selectedClipIds?: Set<number>;
+  onSelectionChange?: (clipId: number) => void;
+  /** Range selection callback for Shift+click */
+  onRangeSelect?: (startId: number, endId: number) => void;
 }
 
 export function ClipGrid({
@@ -28,9 +34,14 @@ export function ClipGrid({
   columnCount: defaultColumnCount = 4,
   itemHeight = 200,
   gap = 16,
+  selectionMode = false,
+  selectedClipIds = new Set(),
+  onSelectionChange,
+  onRangeSelect,
 }: ClipGridProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
 
   // Calculate responsive column count
   useEffect(() => {
@@ -102,16 +113,31 @@ export function ClipGrid({
     onTagToggle(clipId, tag);
   }, [onTagToggle]);
 
+  // Show skeleton loading on initial load
+  if (clips.length === 0 && isLoading) {
+    return (
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${defaultColumnCount}, 1fr)`,
+          gap: `${gap}px`,
+          padding: `${gap}px`,
+        }}
+      >
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column' }}>
+            <div className="skeleton skeleton-card" />
+            <div className="skeleton skeleton-text" style={{ width: '80%' }} />
+            <div className="skeleton skeleton-text-sm" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   if (clips.length === 0 && !isLoading) {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        color: '#888',
-        fontSize: '16px',
-      }}>
+      <div className="loading-indicator">
         No clips found
       </div>
     );
@@ -160,9 +186,29 @@ export function ClipGrid({
                   clip={clip}
                   width={itemWidth}
                   height={itemHeight}
-                  onClick={() => onClipClick(clip)}
+                  onClick={(e) => {
+                    if (selectionMode) {
+                      const currentIndex = clips.findIndex(c => c.id === clip.id);
+
+                      // Shift+click for range selection
+                      if (e.shiftKey && lastSelectedIndex !== null && onRangeSelect) {
+                        const start = Math.min(lastSelectedIndex, currentIndex);
+                        const end = Math.max(lastSelectedIndex, currentIndex);
+                        const startId = clips[start].id;
+                        const endId = clips[end].id;
+                        onRangeSelect(startId, endId);
+                      } else if (onSelectionChange) {
+                        onSelectionChange(clip.id);
+                        setLastSelectedIndex(currentIndex);
+                      }
+                    } else {
+                      onClipClick(clip);
+                    }
+                  }}
                   onFavoriteToggle={() => handleTagToggle(clip.id, 'favorite')}
                   onBadToggle={() => handleTagToggle(clip.id, 'bad')}
+                  selectionMode={selectionMode}
+                  isSelected={selectedClipIds.has(clip.id)}
                 />
               ))}
             </div>
@@ -171,11 +217,7 @@ export function ClipGrid({
       </div>
 
       {isLoading && (
-        <div style={{
-          padding: '20px',
-          textAlign: 'center',
-          color: '#888',
-        }}>
+        <div className="loading-indicator">
           Loading more clips...
         </div>
       )}

@@ -1,7 +1,9 @@
 // Dad Cam - Phase 3 Video Player Component
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { save } from '@tauri-apps/plugin-dialog';
 import type { ClipView } from '../types/clips';
 import { toAssetUrl } from '../utils/paths';
+import { exportStill } from '../api/stills';
 
 interface VideoPlayerProps {
   clip: ClipView;
@@ -25,8 +27,60 @@ export function VideoPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [isExportingStill, setIsExportingStill] = useState(false);
+  const [stillExportStatus, setStillExportStatus] = useState<string | null>(null);
 
   const proxyUrl = toAssetUrl(clip.proxyPath);
+
+  // Export still frame at current timestamp
+  const handleExportStill = useCallback(async () => {
+    if (!videoRef.current || isExportingStill) return;
+
+    const timestampMs = Math.floor(videoRef.current.currentTime * 1000);
+
+    // Pause video for frame selection
+    videoRef.current.pause();
+
+    try {
+      // Open save dialog
+      const defaultName = `${clip.title.replace(/[/\\:*?"<>|]/g, '_')}_frame`;
+      const savePath = await save({
+        title: 'Save Still Frame',
+        defaultPath: `${defaultName}.jpg`,
+        filters: [
+          { name: 'JPEG Image', extensions: ['jpg', 'jpeg'] },
+          { name: 'PNG Image', extensions: ['png'] },
+        ],
+      });
+
+      if (!savePath) {
+        // User cancelled
+        return;
+      }
+
+      // Determine format from extension
+      const format = savePath.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+
+      setIsExportingStill(true);
+      setStillExportStatus('Exporting...');
+
+      const result = await exportStill({
+        clipId: clip.id,
+        timestampMs,
+        outputPath: savePath,
+        format,
+      });
+
+      setStillExportStatus(`Saved: ${result.outputPath.split('/').pop()}`);
+      setTimeout(() => setStillExportStatus(null), 3000);
+    } catch (err) {
+      const message = typeof err === 'string' ? err : err instanceof Error ? err.message : 'Export failed';
+      setStillExportStatus(`Error: ${message}`);
+      setTimeout(() => setStillExportStatus(null), 5000);
+    } finally {
+      setIsExportingStill(false);
+    }
+  }, [clip.id, clip.title, isExportingStill]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -94,12 +148,16 @@ export function VideoPlayer({
           e.preventDefault();
           if (onPrevious) onPrevious();
           break;
+        case 's':
+          e.preventDefault();
+          handleExportStill();
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, onNext, onPrevious]);
+  }, [onClose, onNext, onPrevious, handleExportStill]);
 
   const togglePlayPause = useCallback(() => {
     if (videoRef.current) {
@@ -203,6 +261,7 @@ export function VideoPlayer({
                 cursor: 'pointer',
                 color: clip.isFavorite ? '#ff4444' : '#888',
               }}
+              title={clip.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             >
               {clip.isFavorite ? '\u2665 Favorited' : '\u2661 Favorite'}
             </button>
@@ -216,10 +275,32 @@ export function VideoPlayer({
                 cursor: 'pointer',
                 color: clip.isBad ? '#ffaa00' : '#888',
               }}
+              title={clip.isBad ? 'Unmark as bad clip' : 'Mark as bad clip'}
             >
               {clip.isBad ? '\u2718 Marked Bad' : '\u2717 Mark Bad'}
             </button>
+            <button
+              onClick={handleExportStill}
+              disabled={isExportingStill}
+              style={{
+                background: 'none',
+                border: '1px solid #444',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                cursor: isExportingStill ? 'not-allowed' : 'pointer',
+                color: isExportingStill ? '#666' : '#88ccff',
+              }}
+              title="Export Still Frame (S)"
+            >
+              {isExportingStill ? 'Exporting...' : 'Still (S)'}
+            </button>
           </div>
+          {/* Still export status */}
+          {stillExportStatus && (
+            <span style={{ color: stillExportStatus.startsWith('Error') ? '#ff8888' : '#88ff88', fontSize: '14px', marginLeft: '16px' }}>
+              {stillExportStatus}
+            </span>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -231,6 +312,7 @@ export function VideoPlayer({
             cursor: 'pointer',
             padding: '4px 8px',
           }}
+          title="Close player (Escape)"
         >
           ×
         </button>
@@ -344,6 +426,7 @@ export function VideoPlayer({
               cursor: 'pointer',
               color: 'white',
             }}
+            title={isPlaying ? 'Pause (Space or K)' : 'Play (Space or K)'}
           >
             {isPlaying ? 'Pause' : 'Play'}
           </button>
@@ -355,7 +438,17 @@ export function VideoPlayer({
           <div style={{ flex: 1 }} />
 
           <span style={{ color: '#666', fontSize: '12px' }}>
-            Space/K: Play | J/L: Seek | M: Mute | F: Fullscreen | ESC: Close
+            <span className="kbd">Space</span>/<span className="kbd">K</span> Play
+            {' | '}
+            <span className="kbd">J</span>/<span className="kbd">L</span> Seek
+            {' | '}
+            <span className="kbd">M</span> Mute
+            {' | '}
+            <span className="kbd">F</span> Fullscreen
+            {' | '}
+            <span className="kbd">S</span> Still
+            {' | '}
+            <span className="kbd">Esc</span> Close
           </span>
         </div>
       </div>

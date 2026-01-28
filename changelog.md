@@ -4,6 +4,416 @@ This is the source of truth for version number.
 
 ---
 
+0.1.61 — Braun Design CSS Fix
+
+- Fixed duration badge colors to use rgba(250, 250, 248, 1) instead of pure white
+- Affects event-clip-duration and date-clip-duration classes
+- Complies with Braun Design Language spec (no pure #FFF)
+
+---
+
+0.1.60 — Phase 8 Audit Remediation
+
+- Keyboard hint consistency: VideoPlayer shortcuts now use .kbd CSS class for visual consistency
+- Error boundary integration: Added ErrorBoundary wrapper around LibraryView and LibraryDashboard in App.tsx
+- Loading state usage: Added skeleton loading placeholders to ClipGrid, EventView, and DateView initial load states
+
+---
+
+0.1.59 — Phase 8 Audit Fixes
+
+- Removed skeleton animation to comply with Braun spec D.10 (no animated loaders)
+- Refactored ErrorBoundary to use CSS classes and design system tokens
+- Added error-boundary CSS classes using Braun color variables
+
+---
+
+0.1.58 — Phase 8 Polish and Integration
+
+- Added loading state CSS styles (skeleton, loading-indicator, loading-inline)
+- Added tooltip title attributes to all interactive buttons across all components
+- Added CSS utilities: kbd class for keyboard shortcuts, help-hint for help text
+- Added transition utilities for consistent animations
+- Updated global disabled state styling for buttons, inputs, selects
+- Components updated: VideoPlayer, WelcomeDashboard, LibraryDashboard, FilterBar, EventView, DateView, EventsSection, all modals
+- Completed Phase 8 polish tasks: loading states, tooltips, help text, CSS updates
+
+---
+
+0.1.57 — DatesSection Code Quality Fixes
+
+- Removed redundant handleDateClick wrapper function, now uses onNavigateToDate directly
+- Added data-tree-level attributes to tree buttons for semantic parent-finding
+- Keyboard navigation now uses data attributes instead of CSS class names
+- Decouples keyboard nav logic from styling implementation
+
+---
+
+0.1.56 — Fix Timezone Issues in Date Display
+
+- Added parseLocalDate() helper to safely parse YYYY-MM-DD without UTC timezone shift
+- Added formatClipDate() and formatClipTime() helpers for consistent date/time formatting
+- Fixed formatEventDate() to use parseLocalDate (was showing wrong day in western timezones)
+- Updated EventView.tsx and DateView.tsx to use centralized date formatting helpers
+
+---
+
+0.1.55 — Phase 7 Type Consistency and Date Validation
+
+- Backend: Renamed EventClipItem to EventClipView for consistency with frontend types
+- Backend: Improved date validation with proper days-per-month and leap year handling
+- Frontend: Added isValidDateFormat() helper function for client-side date validation
+
+---
+
+0.1.54 — Phase 7 Audit Fixes
+
+- Backend: Added date format validation (YYYY-MM-DD) to get_clips_by_date command
+- Backend: Refactored get_clips_by_date in schema.rs to use map_clip helper (removes duplication)
+- Frontend: Added refreshTrigger prop to DatesSection for refresh after imports
+- DatesSection now auto-refreshes when clips are imported
+- Wired refreshTrigger through LeftNav and MainLayout to LibraryView
+
+---
+
+0.1.53 — Phase 7 VideoPlayer Integration Fix
+
+- Fixed: Clicking clips in DateView/EventView now opens VideoPlayer (was broken)
+- Changed onClipSelect callback to pass full clip object instead of just clipId
+- Added eventClipToClipView() conversion function (EventClipView -> ClipView)
+- Moved VideoPlayer rendering outside view-specific branches (works for all views)
+- VideoPlayer now renders as modal overlay regardless of current view
+
+---
+
+0.1.52 — Phase 7 Minor Fixes
+
+- DatesSection: Added error state display (was only logging to console)
+- DatesSection: Removed redundant formatDay() function
+- DateView: Fixed timezone issue in date parsing (use local date parts instead of ISO parse)
+- CSS: Added .nav-error style for error state display
+
+---
+
+0.1.51 — Phase 7 Complete (100%)
+
+- DateView: Added pagination with "Load More" button (50 clips per page instead of hardcoded 200)
+- DateView: Shows remaining count in load more button
+- DatesSection: Added full keyboard navigation (Arrow keys, Enter, Space)
+- DatesSection: Arrow Up/Down navigates between visible items
+- DatesSection: Arrow Right expands collapsed year/month
+- DatesSection: Arrow Left collapses expanded year/month or moves to parent
+- DatesSection: Added ARIA attributes for accessibility (role="tree", aria-expanded, aria-selected)
+- Added focus-visible styles for keyboard navigation visibility
+
+---
+
+0.1.50 — Phase 7 Audit Fixes
+
+- Fixed DateView navigation not wired up (clicking dates in nav tree now works)
+- Added 'date' to LibrarySubView type in LibraryView.tsx
+- Added selectedDate state and handleNavigateToDate/handleBackFromDate callbacks
+- Imported and integrated DateView component in LibraryView.tsx renderContent()
+- Passed onNavigateToDate prop through MainLayout to LeftNav to DatesSection
+- Added activeDate prop to DatesSection/LeftNav/MainLayout for nav highlighting
+- Fixed comment in DateView.tsx (Phase 6 -> Phase 7)
+
+---
+
+0.1.49 — Phase 7: Dates View (Tree Navigation)
+
+- Implemented hierarchical Year > Month > Day tree navigation in DatesSection.tsx
+- Tree structure: Years expand to show Months, Months expand to show Days
+- Auto-expands most recent year on load for immediate access
+- Clip counts shown at each level (year total, month total, day count)
+- Collapsible sections with chevron rotation animation
+- Click on day navigates to DateView showing clips for that date
+- All backend commands already existed from Phase 6 (get_clips_grouped_by_date, get_clips_by_date)
+- Added nav-dates-tree CSS with indentation levels and hover states
+- Phase 7 of dashboard-redesign.md now complete
+
+---
+
+0.1.48 — Phase 6 Audit Fixes
+
+Priority 1 (Critical):
+- Fixed hardcoded library ID bug in events.rs - now uses get_current_library() helper
+- All event commands now correctly get library from open database
+
+Priority 2 (Should Fix):
+- Created DateView.tsx component for viewing clips by date
+- Added delete confirmation dialog to EventsSection (shows clip count, requires confirmation)
+- Optimized get_event_clips pagination - now uses SQL LIMIT/OFFSET instead of fetching all IDs
+- Added CSS for DateView and confirm-dialog components
+
+Priority 3 (Nice to Have):
+- Added Shift+click range selection to ClipGrid (onRangeSelect prop)
+- ClipThumbnail now passes mouse event to onClick for detecting modifier keys
+- Added input validation to add_clips_to_event (checks clips exist and belong to same library)
+- Added event existence validation to remove_clips_from_event
+- Added loading state (removing flag) to EventView clip removal
+
+---
+
+0.1.47 — Phase 6 Audit Complete (100%)
+
+- Added Escape key handlers to all event modals (CreateEventModal, EditEventModal, AddToEventModal)
+- Pressing Escape now closes modal when not loading/saving
+- Added event existence check in delete_event command (returns error if event not found)
+- Verified library ID = 1 pattern is correct (each library has its own database)
+- Phase 6 audit now 100% complete
+
+---
+
+0.1.46 — Phase 6 Gap Fixes
+
+- Created EditEventModal.tsx for editing existing events (name, description, dates)
+- Created AddToEventModal.tsx for selecting clips and adding to manual selection events
+- Added clip selection mode to ClipGrid with multi-select checkboxes
+- Added selectionMode, selectedClipIds, onSelectionChange props to ClipGrid
+- Updated ClipThumbnail with selection checkbox and selection outline display
+- Updated LibraryView with selection mode state and "Select Clips" / "Add to Event" buttons
+- Added event navigation: clicking event in LeftNav now opens EventView
+- Added handleNavigateToEvent callback wired through MainLayout to LeftNav
+- Added Edit button to EventView header that opens EditEventModal
+- Added Edit Event option to EventsSection context menu (alongside Delete)
+- Added CSS styles for edit-event-modal, add-to-event-modal, event-list, clip-selection classes
+- Phase 6 gaps 1-4 from audit now resolved
+
+---
+
+0.1.45 — Phase 6: Events System
+
+- Added Migration 3: events table and event_clips junction table
+- Events support two types: date_range (auto-include clips by date) and clip_selection (manual)
+- Event schema: name, description, date_start, date_end, color, icon
+- Created src-tauri/src/commands/events.rs with 10 Tauri commands:
+  - create_event, get_events, get_event, update_event, delete_event
+  - add_clips_to_event, remove_clips_from_event, get_event_clips
+  - get_clips_grouped_by_date, get_clips_by_date
+- Added Event, NewEvent, EventUpdate structs to schema.rs
+- Added event CRUD functions and clip-to-event relationship queries
+- Created src/types/events.ts with EventView, EventClipView, DateGroup types
+- Created src/api/events.ts with TypeScript API wrappers
+- Updated EventsSection.tsx: shows real events list, create event button, context menu delete
+- Created CreateEventModal.tsx: event name, description, type selection, date range inputs
+- Created EventView.tsx: displays event clips, selection mode for removing clips
+- Updated DatesSection.tsx: shows clips grouped by date with counts
+- Added CSS styles for modals, event view, clip grid, context menus
+- Phase 6 of dashboard-redesign.md now complete
+
+---
+
+0.1.44 — Phase 5 Audit Fixes
+
+- Added 20x20 icons to all nav sections (Library, Events, Dates, Settings)
+- Icons use stroke-only style per Braun Design Language spec D.11
+- Added nav-section-header and nav-section-icon CSS classes
+- SettingsSection button now shows "Switch to Pro/Personal" instead of "Open Settings"
+- All Phase 5 audit items resolved
+
+---
+
+0.1.43 — Phase 5: Left Navigation Bar
+
+- Created MainLayout.tsx component with LeftNav + content area structure
+- Created LeftNav.tsx container component for sidebar navigation
+- Created nav/ directory with 4 section components:
+  - LibrarySection.tsx: shows current library name and clip count
+  - EventsSection.tsx: placeholder for Phase 6 events list
+  - DatesSection.tsx: placeholder for Phase 7 date tree navigation
+  - SettingsSection.tsx: shows mode and settings access button
+- Updated LibraryView.tsx to use MainLayout wrapper
+- Added settings prop to LibraryView for settings panel integration
+- LeftNav width: 240px, follows Braun Design Language spec D.5.2
+- Nav sections use 11px/500/uppercase titles per typography spec
+- Settings section positioned at bottom with border separator
+- Added CSS styles for main-layout, left-nav, nav-section, nav-item classes
+- Back button styling consolidated to back-to-libraries-btn class
+- Phase 5 of dashboard-redesign.md now complete
+
+---
+
+0.1.42 — Phase 4: Welcome Dashboard + Stills Export
+
+- Created WelcomeDashboard.tsx component (Personal mode landing page)
+- Welcome Dashboard shows: Import Footage, Stills, Export Footage, Browse All Clips
+- Stills export feature: export high-quality still frame from video at current timestamp
+- Created src-tauri/src/commands/stills.rs with export_still Tauri command
+- Stills uses original video file (not proxy) for maximum resolution
+- FFmpeg -vframes 1 extraction with JPG (q:v 2) or PNG format
+- Added S key shortcut in VideoPlayer for quick stills export
+- Added Still button to VideoPlayer header with status feedback
+- Native save dialog for choosing output path and format
+- Created src/api/stills.ts with TypeScript types and exportStill function
+- Updated LibraryView with currentView state (welcome/clips/stills navigation)
+- Personal mode now shows Welcome Dashboard on library open (not clips grid directly)
+- Added Back button in clips view to return to Welcome Dashboard
+- Stills mode shows instructional header "Click a clip, then press S"
+- Added dialog:allow-save permission to capabilities/default.json
+- Added welcome-dashboard CSS styles following Braun Design Language
+- Phase 4 of dashboard-redesign.md now complete
+
+---
+
+0.1.41 — Phase 3 Audit: 100% Compliance
+
+- Added "Back to Libraries" button to LibraryView header (Pro mode only)
+- LibraryView now accepts mode prop, shows back navigation in Pro mode
+- Close Library button only shown in Personal mode (Pro uses back button)
+- Fixed title casing: "Dad Cam" changed to "dad cam" per Braun brand spec
+- Subtitle casing updated: "Video library..." to "video library..."
+- Loading screen text updated to lowercase per brand spec
+- Implemented library thumbnail extraction for LibraryCard display
+- add_recent_library now queries first clip's thumbnail from library database
+- get_library_thumbnail helper function added to settings.rs
+- LibraryCard now uses convertFileSrc for proper Tauri asset URL
+- Added back-to-libraries-btn CSS with hover and focus states
+- Phase 3 now 100% compliant with dashboard-redesign.md plan
+
+---
+
+0.1.40 — Phase 3 Audit Fixes (Braun Design Language)
+
+- Updated App.css to use Braun Design Language CSS custom properties
+- Added CSS variables for colors, spacing, and radii per Appendix D spec
+- Primary buttons now use near-black bg (--color-text) instead of blue
+- Focus states now use amber accent (--color-accent: #f59e0b) per spec
+- Canvas color corrected to #0a0a0b (was #0f0f0f)
+- All border-radius values now use --radius-* variables (max 8px per spec)
+- Fixed pluralization bug in LibraryCard.tsx formatLastOpened()
+- Added isSelected prop and .is-selected class to LibraryCard component
+- Extracted inline error message styles to .library-dashboard-error CSS class
+- Input labels now uppercase with letter-spacing per Braun typography spec
+- All hardcoded color values replaced with CSS custom properties
+
+---
+
+0.1.39 — Dashboard Redesign Phase 3: Library Dashboard (Pro Mode)
+
+- Created LibraryCard.tsx component with thumbnail display and metadata
+- Created LibraryDashboard.tsx for Pro mode multi-library selection
+- Library grid layout with recent libraries shown as cards
+- "New Library" button with create form dialog
+- "Open Library" button with native folder picker
+- Remove library from recent list (X button on card hover)
+- Settings icon button in dashboard header
+- Empty state when no recent libraries
+- App.tsx now routes to LibraryDashboard when mode=pro and no library open
+- Added CSS styles for library dashboard, grid, cards, and actions
+- Phase 3 of dashboard-redesign.md now complete
+
+---
+
+0.1.38 — Phase 2 Audit Fixes
+
+- Created src/constants.ts as single source of truth for APP_VERSION
+- Updated SettingsPanel.tsx to import version from constants instead of hardcoding
+- Version string now centralized for easier maintenance
+
+---
+
+0.1.37 — Dashboard Redesign Phase 2: Mode System
+
+- Created SettingsPanel.tsx component with mode toggle UI
+- Added Personal/Pro mode radio options with descriptions
+- Settings panel accessible via gear icon button (fixed bottom-right)
+- Mode indicator at bottom of welcome screen is now clickable
+- Mode changes saved immediately via setMode API
+- Added settings panel CSS: backdrop, panel, header, sections, mode options
+- Phase 2 of dashboard-redesign.md now complete
+
+---
+
+0.1.36 — Dashboard Redesign Phase 1: App Settings Persistence
+
+- Added tauri-plugin-store dependency for persistent app settings
+- Created src-tauri/src/commands/settings.rs with 8 Tauri commands:
+  - get_app_settings, save_app_settings, get_mode, set_mode
+  - add_recent_library, remove_recent_library, get_recent_libraries
+  - validate_library_path (checks if library database exists)
+- Settings stored via Tauri Store plugin at platform-specific location
+- Settings schema: version, mode (personal/pro), lastLibraryPath, recentLibraries
+- Created src/types/settings.ts with TypeScript types
+- Created src/api/settings.ts with 7 API functions
+- Updated App.tsx: loads settings on mount, auto-opens last library in Personal mode
+- Added recent libraries list to welcome screen
+- Added unmounted library handling (shows retry/remove UI when drive disconnected)
+- Added store permissions to capabilities/default.json
+- Updated App.css with recent libraries, library path, checkbox group styles
+- Phase 1 of dashboard-redesign.md now complete
+
+---
+
+0.1.35 — Client One-Sheet Prototype
+
+- Added Braun-style client one-sheet in docs/client/onesheet.html
+- Camera selection, coverage options, delivery options layout
+- Minimal grid design with camera images
+
+---
+
+0.1.34 — Dashboard Redesign Implementation Audit (v1.4)
+
+- Complete implementation audit of dashboard-redesign.md
+- Added tauri-plugin-dialog dependency for native save dialogs (Stills feature)
+- Added AppContext.tsx for global state and navigation management
+- Added state-based navigation system (not React Router) with view history
+- Added complete stills.rs command implementation with error handling
+- Added keyboard shortcut documentation (S key for Stills)
+- Added clip multi-select implementation pattern for event creation
+- Resolved date picker: use native HTML5 date inputs (no library needed)
+- Added unmounted volume handling with "Library Not Available" UI
+- Added settings corruption recovery (reset to defaults)
+- Updated capabilities config with store and dialog permissions
+- Fixed date range query to use date() function for correct comparison
+- Added event type constants (EVENT_TYPES) to TypeScript types
+- Added post-action navigation flows for Welcome Dashboard
+- Added "Back to Libraries" button documentation for Pro mode
+- Expanded test coverage: settings corruption, unmounted volumes, stills errors
+- Consolidated file lists (removed duplicate "Additional from Audit" section)
+
+---
+
+0.1.33 — Dashboard Redesign Braun Audit (v1.3)
+
+- Added Appendix D: Braun Design Language Specifications to dashboard-redesign.md
+- Audited all UI components against Braun Design Language v1.0.0
+- Added typography specs: Braun Linear font family, weights 700/500/400/300
+- Added color system: light mode tokens, dark mode tokens, functional colors
+- Added spacing system: 8pt grid with exact values per component
+- Added border radius constraints: 4px badges, 6px buttons, 8px cards, max 8px
+- Added component specs: MainLayout, LeftNav, WelcomeDashboard, LibraryDashboard
+- Added component specs: LibraryCard, EventView, DateView, CreateEventModal, SettingsPanel
+- Added button specifications: primary, secondary, ghost, destructive, accent (amber)
+- Added input specifications: text input, labels, helper text, toggle
+- Added card grid specs for ClipGrid
+- Added empty state specs with exact typography and spacing
+- Added loading state rules: no animated skeletons, text or static progress only
+- Added icon specs: stroke-only, currentColor, functional only
+- Added dark mode implementation guide with elevation system
+- Added accessibility requirements: 4.5:1 contrast, 44px touch targets, focus states
+- Added Braun verification checklist (14 items)
+- Added anti-patterns list (12 prohibited patterns)
+- Added CSS custom properties for all design tokens
+
+---
+
+0.1.32 — Dashboard Redesign Planning (v1.2 Final)
+
+- Created comprehensive implementation plan: docs/planning/dashboard-redesign.md
+- Documented root cause of "always shows open library" issue (no app-level settings)
+- Defined Personal vs Pro mode architecture
+- Specified Welcome Dashboard (Personal) and Library Dashboard (Pro) requirements
+- Designed Left Nav Bar with Library, Events, Dates, Settings sections
+- Planned Events system database schema (Migration 3)
+- Documented all backend (Rust) and frontend (React) changes needed
+- Created 11-phase implementation checklist with 70+ tasks
+- Listed 20 new files and 11 modified files
+- Audit complete: Stills feature defined (frame export), Activity Feed removed, Camera Profiles deferred
+
+---
+
 0.1.31 — Library Creation Fix + Import UI
 
 - Fixed library creation bug: DbState now stored after create (connection was being dropped)
