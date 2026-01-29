@@ -94,8 +94,8 @@ fn parse_ebur128_stats(output: &str) -> AudioStats {
         }
     }
 
-    // Pattern: True peak: -3.0 dBTP
-    if let Some(cap) = Regex::new(r"True peak:\s*(-?\d+\.?\d*)\s*dBTP")
+    // Pattern: Peak: -3.0 dBTP (under "True peak:" section)
+    if let Some(cap) = Regex::new(r"Peak:\s*(-?\d+\.?\d*)\s*dBTP")
         .ok()
         .and_then(|re| re.captures(output))
     {
@@ -132,7 +132,7 @@ fn compute_audio_score(stats: &AudioStats) -> (f64, String) {
 
             if i < -35.0 {
                 reasons.push(format!("Very quiet audio: {:.1} LUFS", i));
-                return (score.max(0.2), R_AUDIO_SILENT.to_string());
+                return (score.min(0.4).max(0.1), R_AUDIO_SILENT.to_string());
             } else if i > -10.0 {
                 reasons.push(format!("Very loud audio: {:.1} LUFS", i));
                 return (score.max(0.5), R_AUDIO_LOUD.to_string());

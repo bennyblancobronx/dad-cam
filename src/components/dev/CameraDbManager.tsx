@@ -16,7 +16,7 @@ interface CameraDbManagerProps {
   copyToClipboard: (text: string) => void;
 }
 
-export function CameraDbManager({ showMessage, showError, copyToClipboard }: CameraDbManagerProps) {
+export function CameraDbManager({ showMessage, showError, copyToClipboard: _copyToClipboard }: CameraDbManagerProps) {
   const [profiles, setProfiles] = useState<CameraProfile[]>([]);
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [isLoading, setIsLoading] = useState(false);

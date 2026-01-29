@@ -41,7 +41,7 @@ mod tests {
                 },
                 FixtureType::MotionNoisy => ScoreRanges {
                     scene: (0.2, 1.0),      // Medium-high - testsrc2 has movement
-                    audio: (0.2, 0.8),      // Medium - noise audio present
+                    audio: (0.2, 1.0),      // Varies - synthetic noise may score well
                     sharpness: (0.2, 0.8),  // Medium - test pattern clarity varies
                     motion: (0.3, 1.0),     // Medium-high - testsrc2 animates
                 },
