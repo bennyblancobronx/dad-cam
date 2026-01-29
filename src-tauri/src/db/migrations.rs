@@ -274,6 +274,49 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_event_clips_event ON event_clips(event_id);
     CREATE INDEX idx_event_clips_clip ON event_clips(clip_id);
     "#,
+
+    // Migration 4: Export history (VHS Export)
+    r#"
+    CREATE TABLE export_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        library_id INTEGER NOT NULL REFERENCES libraries(id),
+        output_path TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        selection_mode TEXT NOT NULL,
+        selection_params TEXT DEFAULT '{}',
+        ordering TEXT NOT NULL DEFAULT 'chronological',
+        title_text TEXT,
+        resolution TEXT,
+        is_watermarked INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        duration_ms INTEGER,
+        file_size_bytes INTEGER,
+        clip_count INTEGER,
+        error_message TEXT,
+        completed_at TEXT
+    );
+    CREATE INDEX idx_export_history_library ON export_history(library_id);
+    CREATE INDEX idx_export_history_status ON export_history(status);
+    "#,
+
+    // Migration 5: Camera devices + clip device linkage (Phase 5)
+    r#"
+    CREATE TABLE camera_devices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT NOT NULL UNIQUE,
+        profile_id INTEGER REFERENCES camera_profiles(id),
+        serial_number TEXT,
+        fleet_label TEXT,
+        usb_fingerprints TEXT DEFAULT '[]',
+        rental_notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    ALTER TABLE clips ADD COLUMN camera_device_id INTEGER REFERENCES camera_devices(id);
+
+    CREATE INDEX idx_camera_devices_uuid ON camera_devices(uuid);
+    CREATE INDEX idx_clips_camera_device ON clips(camera_device_id);
+    "#,
 ];
 
 /// Get current schema version from database

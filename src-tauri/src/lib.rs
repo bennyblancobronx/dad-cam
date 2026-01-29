@@ -11,15 +11,18 @@ pub mod jobs;
 pub mod camera;
 pub mod preview;
 pub mod scoring;
+pub mod licensing;
+pub mod export;
 pub mod commands;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, State};
 use serde::{Deserialize, Serialize};
 
 use db::{open_db, get_db_path};
 use db::schema::{self, Job};
+use jobs::progress::{JobProgress, emit_progress};
 
 // Re-export DbState from commands module for state management
 pub use commands::DbState;
@@ -34,12 +37,24 @@ pub struct IngestResponse {
     pub skipped: usize,
     pub failed: usize,
     pub clips_created: Vec<i64>,
+    pub camera_breakdown: Vec<ingest::CameraBreakdown>,
 }
 
 // Ingest Commands (separate from Phase 3 clip/library/tag commands)
 
 #[tauri::command]
-fn start_ingest(state: State<DbState>, source_path: String, library_path: String) -> Result<IngestResponse, String> {
+fn start_ingest(
+    app: AppHandle,
+    source_path: String,
+    library_path: String,
+    event_id: Option<i64>,
+    new_event_name: Option<String>,
+) -> Result<IngestResponse, String> {
+    // License check
+    if !licensing::is_allowed("import") {
+        return Err("Trial expired. Please activate a license to import footage.".to_string());
+    }
+
     let library_root = PathBuf::from(&library_path);
     let db_path = get_db_path(&library_root);
     let conn = open_db(&db_path).map_err(|e| e.to_string())?;
@@ -52,8 +67,62 @@ fn start_ingest(state: State<DbState>, source_path: String, library_path: String
     let job_id = ingest::create_ingest_job(&conn, lib.id, &source_path, &lib.ingest_mode)
         .map_err(|e| e.to_string())?;
 
-    let result = ingest::run_ingest_job(&conn, job_id, &library_root)
-        .map_err(|e| e.to_string())?;
+    let job_id_str = job_id.to_string();
+
+    // Register cancel flag so frontend can cancel this job
+    let cancel_flag = jobs::register_cancel_flag(&job_id_str);
+
+    // Emit initial progress
+    emit_progress(&app, &JobProgress::new(&job_id_str, "discover", 0, 1)
+        .with_message("Discovering files..."));
+
+    let result = ingest::run_ingest_job_with_progress(&conn, job_id, &library_root, &app, &cancel_flag)
+        .map_err(|e| {
+            jobs::remove_cancel_flag(&job_id_str);
+            e.to_string()
+        })?;
+
+    // Clean up cancel flag
+    jobs::remove_cancel_flag(&job_id_str);
+
+    // Link clips to event if requested
+    if !result.clips_created.is_empty() {
+        let target_event_id = if let Some(name) = &new_event_name {
+            // Create a new event, then use its ID
+            let new_event = schema::NewEvent {
+                library_id: lib.id,
+                name: name.clone(),
+                description: None,
+                event_type: "clip_selection".to_string(),
+                date_start: None,
+                date_end: None,
+                color: None,
+                icon: None,
+            };
+            Some(schema::insert_event(&conn, &new_event).map_err(|e| e.to_string())?)
+        } else {
+            event_id
+        };
+
+        if let Some(eid) = target_event_id {
+            schema::add_clips_to_event(&conn, eid, &result.clips_created)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Emit previews phase (preview jobs are queued as background work)
+    let total = result.total_files as u64;
+    if result.processed > 0 {
+        emit_progress(&app, &JobProgress::new(&job_id_str, "previews", total, total)
+            .with_message(format!("Queued preview generation for {} clips", result.processed)));
+    }
+
+    // Emit completion
+    emit_progress(&app, &JobProgress::new(&job_id_str, "complete", total, total)
+        .with_message(format!(
+            "Import complete: {} processed, {} skipped, {} failed",
+            result.processed, result.skipped, result.failed
+        )));
 
     Ok(IngestResponse {
         job_id,
@@ -62,7 +131,13 @@ fn start_ingest(state: State<DbState>, source_path: String, library_path: String
         skipped: result.skipped,
         failed: result.failed,
         clips_created: result.clips_created,
+        camera_breakdown: result.camera_breakdown,
     })
+}
+
+#[tauri::command]
+fn cancel_job(job_id: String) -> Result<bool, String> {
+    Ok(jobs::request_cancel(&job_id))
 }
 
 #[tauri::command]
@@ -128,6 +203,31 @@ pub fn run() {
             // Ingest commands
             start_ingest,
             get_jobs,
+            cancel_job,
+            // Licensing commands
+            commands::get_license_state,
+            commands::activate_license,
+            commands::deactivate_license,
+            commands::is_feature_allowed,
+            // VHS Export commands
+            commands::start_vhs_export,
+            commands::get_export_history,
+            commands::cancel_export,
+            // Camera system commands (Phase 5)
+            commands::list_camera_profiles,
+            commands::list_camera_devices,
+            commands::register_camera_device,
+            commands::match_camera,
+            commands::import_camera_db,
+            commands::export_camera_db,
+            // Dev menu commands (Phase 9)
+            commands::test_ffmpeg,
+            commands::clear_caches,
+            commands::export_database,
+            commands::export_exif_dump,
+            commands::execute_raw_sql,
+            commands::generate_rental_keys,
+            commands::get_db_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,8 +4,6 @@ import type { ClipView, LibraryInfo, FilterType, SortField, SortOrder } from '..
 import type { AppSettings } from '../types/settings';
 import type { EventClipView } from '../types/events';
 import { getClipsFiltered, toggleTag, getLibraryRoot } from '../api/clips';
-import { open } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
 import { setLibraryRoot } from '../utils/paths';
 import { clearThumbnailCache } from '../utils/thumbnailCache';
 import { MainLayout } from './MainLayout';
@@ -17,6 +15,9 @@ import { SettingsView } from './SettingsView';
 import { EventView } from './EventView';
 import { DateView } from './DateView';
 import { AddToEventModal } from './modals/AddToEventModal';
+import { ExportDialog } from './ExportDialog';
+import { ImportDialog } from './ImportDialog';
+import { isFeatureAllowed } from '../api/licensing';
 
 /**
  * Convert EventClipView to ClipView format for VideoPlayer.
@@ -45,8 +46,8 @@ type LibrarySubView = 'welcome' | 'clips' | 'stills' | 'event' | 'date' | 'setti
 interface LibraryViewProps {
   library: LibraryInfo;
   onClose: () => void;
-  /** App mode - shows "Back to Libraries" in Pro mode */
-  mode?: 'personal' | 'pro';
+  /** App mode - shows "Back to Projects" in Advanced mode */
+  mode?: 'simple' | 'advanced';
   /** App settings for settings panel */
   settings?: AppSettings | null;
   /** Callback when settings change */
@@ -58,13 +59,13 @@ const PAGE_SIZE = 50;
 export function LibraryView({
   library,
   onClose,
-  mode = 'personal',
+  mode = 'simple',
   settings,
   onSettingsChange,
 }: LibraryViewProps) {
-  // View state - Personal mode starts on Welcome Dashboard
+  // View state - Simple mode starts on Welcome Dashboard
   const [currentView, setCurrentView] = useState<LibrarySubView>(
-    mode === 'personal' ? 'welcome' : 'clips'
+    mode === 'simple' ? 'welcome' : 'clips'
   );
 
   // Previous view for back navigation from settings
@@ -87,8 +88,8 @@ export function LibraryView({
   // Player state
   const [selectedClip, setSelectedClip] = useState<ClipView | null>(null);
 
-  // Import state (only used in clips view header)
-  const [isImporting, setIsImporting] = useState(false);
+  // Import dialog state
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
 
   // Stills mode state - when user navigates from Welcome for stills
@@ -104,6 +105,9 @@ export function LibraryView({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedClipIds, setSelectedClipIds] = useState<Set<number>>(new Set());
   const [showAddToEventModal, setShowAddToEventModal] = useState(false);
+
+  // Export dialog state
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   // Request cancellation ref
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -316,6 +320,13 @@ export function LibraryView({
     }
   }, [clips.length, loadClips]);
 
+  // Navigate to favorites (clips view with favorites filter)
+  const handleNavigateToFavorites = useCallback(() => {
+    setFilter('favorites');
+    setIsStillsMode(false);
+    setCurrentView('clips');
+  }, []);
+
   // Navigate to settings
   const handleNavigateToSettings = useCallback(() => {
     setPreviousView(currentView);
@@ -358,47 +369,13 @@ export function LibraryView({
     setSelectedClipIds(new Set());
   }, []);
 
-  // Handle import footage
-  const handleImport = useCallback(async () => {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Select Folder to Import',
-      });
-
-      if (!selected) return;
-
-      setIsImporting(true);
-      setImportStatus('Importing...');
-      setError(null);
-
-      const result = await invoke<{
-        jobId: number;
-        totalFiles: number;
-        processed: number;
-        skipped: number;
-        failed: number;
-        clipsCreated: number[];
-      }>('start_ingest', {
-        sourcePath: selected,
-        libraryPath: library.rootPath,
-      });
-
-      setImportStatus(`Imported ${result.processed} files (${result.skipped} skipped, ${result.failed} failed)`);
-
-      // Reload clips to show new imports
-      loadClips(true);
-
-      // Trigger dates section refresh
-      setRefreshTrigger(prev => prev + 1);
-    } catch (err) {
-      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Import failed');
-      setImportStatus(null);
-    } finally {
-      setIsImporting(false);
-    }
-  }, [library.rootPath, loadClips]);
+  // Handle import complete - reload clips and refresh dates
+  const handleImportComplete = useCallback(() => {
+    loadClips(true);
+    setRefreshTrigger(prev => prev + 1);
+    setImportStatus('Import complete');
+    setTimeout(() => setImportStatus(null), 5000);
+  }, [loadClips]);
 
   // Build header content based on current view
   const headerContent = (
@@ -406,22 +383,22 @@ export function LibraryView({
       <div className="main-header-left">
         {/* Back/Close button */}
         {currentView === 'welcome' ? (
-          // Welcome view: Pro mode shows back to libraries, Personal shows close
-          mode === 'pro' ? (
+          // Welcome view: Advanced mode shows back to projects, Simple shows close
+          mode === 'advanced' ? (
             <button onClick={onClose} className="back-to-libraries-btn">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M10 12L6 8l4-4" />
               </svg>
-              Libraries
+              Projects
             </button>
           ) : (
             <button onClick={onClose} className="secondary-button" style={{ padding: '6px 12px' }}>
-              Close Library
+              Close Project
             </button>
           )
         ) : (
-          // Clips/Stills view: Personal shows back to welcome, Pro shows back to libraries
-          mode === 'personal' ? (
+          // Clips/Stills view: Simple shows back to welcome, Advanced shows back to libraries
+          mode === 'simple' ? (
             <button onClick={handleNavigateToWelcome} className="back-to-libraries-btn">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M10 12L6 8l4-4" />
@@ -433,7 +410,7 @@ export function LibraryView({
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M10 12L6 8l4-4" />
               </svg>
-              Libraries
+              Projects
             </button>
           )
         )}
@@ -447,7 +424,7 @@ export function LibraryView({
       <div className="main-header-right">
         {/* Import status */}
         {importStatus && (
-          <span style={{ color: 'var(--color-success)', fontSize: '14px' }}>{importStatus}</span>
+          <span style={{ color: importStatus.toLowerCase().includes('expired') ? 'var(--color-error)' : 'var(--color-success)', fontSize: '14px' }}>{importStatus}</span>
         )}
         {/* Selection mode actions */}
         {selectionMode && currentView === 'clips' && (
@@ -483,12 +460,29 @@ export function LibraryView({
               Select Clips
             </button>
             <button
-              onClick={handleImport}
-              disabled={isImporting}
+              onClick={() => setShowExportDialog(true)}
               className="secondary-button"
               style={{ padding: '6px 12px' }}
             >
-              {isImporting ? 'Importing...' : 'Import Footage'}
+              VHS Export
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const allowed = await isFeatureAllowed('import');
+                  if (!allowed) {
+                    setImportStatus('Trial expired. Please activate a license to import footage.');
+                    return;
+                  }
+                } catch {
+                  // If check fails, let backend handle it
+                }
+                setShowImportDialog(true);
+              }}
+              className="secondary-button"
+              style={{ padding: '6px 12px' }}
+            >
+              Import Footage
             </button>
           </>
         )}
@@ -510,6 +504,7 @@ export function LibraryView({
           library={library}
           onNavigateToClips={handleNavigateToClips}
           onNavigateToStills={handleNavigateToStills}
+          featureFlags={settings?.featureFlags}
         />
       );
     }
@@ -589,6 +584,25 @@ export function LibraryView({
             onAdded={handleClipsAddedToEvent}
           />
         )}
+
+        {/* VHS Export Dialog */}
+        {showExportDialog && (
+          <ExportDialog
+            libraryPath={library.rootPath}
+            mode={mode}
+            onClose={() => setShowExportDialog(false)}
+          />
+        )}
+
+        {/* Import Dialog */}
+        {showImportDialog && (
+          <ImportDialog
+            libraryPath={library.rootPath}
+            showCameraBreakdown={mode === 'advanced'}
+            onClose={() => setShowImportDialog(false)}
+            onComplete={handleImportComplete}
+          />
+        )}
       </>
     );
   };
@@ -629,8 +643,12 @@ export function LibraryView({
         onNavigateToSettings={handleNavigateToSettings}
         onNavigateToEvent={handleNavigateToEvent}
         onNavigateToDate={handleNavigateToDate}
+        onNavigateToFavorites={handleNavigateToFavorites}
         activeDate={selectedDate}
+        isFavoritesActive={currentView === 'clips' && filter === 'favorites'}
         refreshTrigger={refreshTrigger}
+        mode={mode}
+        featureFlags={settings?.featureFlags}
         header={headerContent}
       >
         {renderContent()}

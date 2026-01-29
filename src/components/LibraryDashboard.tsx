@@ -1,5 +1,5 @@
-// Dad Cam - Library Dashboard (Pro Mode)
-// Multi-library selection view with card grid
+// Dad Cam - Project Dashboard (Advanced Mode)
+// Multi-project selection view with card grid
 
 import { useState, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -43,7 +43,7 @@ export function LibraryDashboard({
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Dad Cam Library',
+        title: 'Select Dad Cam Project',
       });
 
       if (!selected) {
@@ -62,7 +62,7 @@ export function LibraryDashboard({
       onLibrarySelect(lib);
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open project'
       );
     } finally {
       setIsLoading(false);
@@ -94,7 +94,7 @@ export function LibraryDashboard({
       onLibrarySelect(lib);
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open project'
       );
     } finally {
       setIsLoading(false);
@@ -107,7 +107,7 @@ export function LibraryDashboard({
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Folder for New Library',
+        title: 'Select Folder for New Project',
       });
       if (selected) {
         setLibraryPath(selected as string);
@@ -120,7 +120,7 @@ export function LibraryDashboard({
   // Create new library
   const handleCreateLibrary = useCallback(async () => {
     if (!libraryPath.trim() || !newLibraryName.trim()) {
-      setError('Please select a folder and enter a library name');
+      setError('Please select a folder and enter a project name');
       return;
     }
 
@@ -143,7 +143,7 @@ export function LibraryDashboard({
       onLibrarySelect(lib);
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to create library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to create project'
       );
     } finally {
       setIsLoading(false);
@@ -168,7 +168,7 @@ export function LibraryDashboard({
       <header className="library-dashboard-header">
         <div className="library-dashboard-titles">
           <h1 className="library-dashboard-title">dad cam</h1>
-          <span className="library-dashboard-subtitle">libraries</span>
+          <span className="library-dashboard-subtitle">projects</span>
         </div>
         <button
           className="settings-icon-button"
@@ -194,7 +194,7 @@ export function LibraryDashboard({
         {/* Create form */}
         {showCreateForm ? (
           <div className="library-create-form">
-            <h2 className="library-create-title">Create New Library</h2>
+            <h2 className="library-create-title">Create New Project</h2>
 
             <div className="input-group">
               <label htmlFor="new-library-path">Location</label>
@@ -224,7 +224,7 @@ export function LibraryDashboard({
               <input
                 id="library-name"
                 type="text"
-                placeholder="My Video Library"
+                placeholder="My Video Project"
                 value={newLibraryName}
                 onChange={(e) => setNewLibraryName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateLibrary()}
@@ -238,7 +238,7 @@ export function LibraryDashboard({
                 onClick={handleCreateLibrary}
                 disabled={isLoading}
               >
-                {isLoading ? 'Creating...' : 'Create Library'}
+                {isLoading ? 'Creating...' : 'Create Project'}
               </button>
               <button
                 className="secondary-button"
@@ -257,11 +257,11 @@ export function LibraryDashboard({
         ) : (
           <>
             {/* Recent Libraries Grid */}
-            {settings.recentLibraries.length > 0 && (
+            {settings.recentProjects.length > 0 && (
               <section className="library-section">
-                <h2 className="library-section-title">Recent Libraries</h2>
+                <h2 className="library-section-title">Recent Projects</h2>
                 <div className="library-grid">
-                  {settings.recentLibraries.map((lib) => (
+                  {settings.recentProjects.map((lib) => (
                     <div key={lib.path} className="library-grid-item">
                       <LibraryCard
                         library={lib}
@@ -290,36 +290,36 @@ export function LibraryDashboard({
                 className="library-action-button library-action-new"
                 onClick={() => setShowCreateForm(true)}
                 disabled={isLoading}
-                title="Create a new video library"
+                title="Create a new video project"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 5v14M5 12h14" />
                 </svg>
-                <span>New Library</span>
+                <span>New Project</span>
               </button>
               <button
                 className="library-action-button library-action-open"
                 onClick={handleOpenLibrary}
                 disabled={isLoading}
-                title="Open an existing library folder"
+                title="Open an existing project folder"
               >
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                   <path d="M8 12h8" />
                 </svg>
-                <span>{isLoading ? 'Opening...' : 'Open Library'}</span>
+                <span>{isLoading ? 'Opening...' : 'Open Project'}</span>
               </button>
             </section>
 
             {/* Empty state */}
-            {settings.recentLibraries.length === 0 && (
+            {settings.recentProjects.length === 0 && (
               <div className="library-empty-state">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                   <path d="M3 7l9 6 9-6" />
                 </svg>
-                <h3>No recent libraries</h3>
-                <p>Create a new library or open an existing one to get started.</p>
+                <h3>No recent projects</h3>
+                <p>Create a new project or open an existing one to get started.</p>
               </div>
             )}
           </>

@@ -4,6 +4,477 @@ This is the source of truth for version number.
 
 ---
 
+0.1.104 -- Documentation sync (post-build audit)
+
+- Implementation guide v4: synced all 11 steps to match built codebase
+  - get_db_stats added to dev menu commands (6->7, total 25->26 new, 63->64 overall)
+  - Step 9: added live log viewer, database stats, full profile/device tables, inline key activation, native file dialogs
+  - Step 10: macOS -xml plist, Windows PowerShell Get-CimInstance, catch_unwind, root hub filtering
+  - Post-implementation audit notes table added
+- contracts.md: added .dadcam/sidecars/ to library structure (added in v0.2.0 Phase 6)
+- techguide.md: version 0.1.100->0.1.104, added sidecars/ to library structure, updated USB fingerprint methods (system_profiler -xml, PowerShell Get-CimInstance, catch_unwind), updated dev menu sections to match built UI
+
+0.1.103 -- Phase 11: Terminology rename (Library -> Project)
+
+- All user-facing UI text now says "Project" instead of "Library" (buttons, headings, tooltips, error messages, placeholders)
+- Updated: LibraryDashboard, LibraryView, LibraryCard, LibrarySection, WelcomeDashboard, EventView, DateView, FirstRunWizard, App
+- Comments updated: "Personal Mode" -> "Simple Mode", "Pro Mode" -> "Advanced Mode"
+- Internal code (variable names, types, CSS classes, API names) unchanged -- only UI-facing strings renamed
+- App tagline "Video library for dad cam footage" kept as-is (describes the app, not a workspace)
+
+0.1.102 -- Phase 10: USB fingerprint quality improvements
+
+- macOS: switched from plain-text system_profiler to -xml plist output for stable parsing across macOS versions
+- Windows: replaced deprecated wmic with PowerShell Get-CimInstance (future-proof for Windows 10+)
+- Windows: VID/PID extraction now uses regex instead of fixed-offset slicing
+- All platforms: filter out root hubs and deduplicate fingerprint entries
+
+0.1.101 -- Phase 10: USB Registration hardening (best-effort)
+
+- Wrapped capture_usb_fingerprint in std::panic::catch_unwind to prevent platform-specific panics from crashing the app
+- USB detection already implemented for macOS (system_profiler), Windows (wmic), Linux (/sys/bus/usb/devices/) in Phase 5
+- Phase 10 adds panic safety per implementation guide: all USB detection is now catch_unwind guarded
+- Failure at any level (panic, process error, parse error) silently returns None -- never blocks user flow
+
+0.1.100 -- Phase 9 audit fixes
+
+- Added theme toggle (light/dark) to Settings General section, visible in Advanced mode only
+- Fixed mode change sync: SettingsView now re-fetches settings from backend after mode switch instead of reconstructing locally
+
+0.1.99 -- Packages onesheet rework
+
+- Nostalgically Correct price updated to $2,400
+- Removed "Includes 1 Videographer up to 8 Hours" footer from both cards
+- Added "Choose One" label inside Nostalgically Correct and The Classics (pick your medium)
+- Super 8 / Dad Cam / Modern Digital options in distinct bordered sections, cards mirror each other
+- Replaced "The Full Family Mixed Media Experience" with "Mixed Media Dreamteam"
+- Dreamteam: 2x2 medium picker (choose up to 4), 3 recommended experiences, always-included section
+- Full page flex layout fills exact 8.5x11 with footer pinned naturally (no absolute positioning)
+- "Experiences We Recommend" uses distinct section-title style vs column label style
+- Grid rows weighted 3:2 for balanced top/bottom distribution
+
+0.1.98 -- Phase 9 planning doc audit corrections
+
+- Corrected phase-9-app-reorganization.md to match implementation guide (source of truth)
+- Fixed DevMenuSettings field names: titleStartTime->titleStartSeconds, blendDuration->jlBlendMs
+- Added missing watermarkText and licenseStateCache to settings type spec
+- Fixed default faceDetection from true to false for Simple mode defaults
+- Corrected soft lock spec: rendered exports allowed with watermark+720p cap, export originals always allowed
+- Updated licensing to match implementation: BLAKE3 keyed hash, keychain trial storage, key prefixes
+- Updated file structure to show actual files built (renames deferred per implementation guide)
+- Added all backend files (Rust modules, commands, migrations) to file structure
+- Updated dev menu spec to include all 7 backend commands
+- Removed non-existent lastProjectPath and ThemeMode type alias from type spec
+- Updated migration notes to reference actual Rust implementation
+
+0.1.97 -- Nightfox Films packages onesheet
+
+- Add docs/client/packages.html -- single-page printable package sheet for Nightfox Films
+- Three tiers: Nostalgically Correct ($1800), The Classics ($2800), The Full Family Experience
+- Raw Footage Experiences starting at $5800
+- Matches existing onesheet.html Braun/clean style
+
+0.1.96 -- Phase 9 audit fixes
+
+- CameraDbManager: show full profile list table and device list table (was only showing count)
+- CameraDbManager: add Import JSON and Export JSON buttons with native file dialogs
+- LicenseTools: add inline key activation with text input and Activate button
+- DebugTools: add Export EXIF Dump UI (clip ID input + save dialog)
+- DebugTools: add live log viewer (listens for job-progress events, last 200 lines)
+- Add CSS for devmenu tables and log viewer
+
+0.1.95 -- Phase 9 spec compliance
+
+- Fix clear_caches: now clears proxies/, thumbs/, sprites/ (was clearing wrong directories)
+- Fix export_database: copies .db file to user-chosen path via save dialog (was returning text dump)
+- Add export_exif_dump command: exports full exiftool JSON for a clip to output path
+- Register export_exif_dump in Tauri command handler
+- Extract dev/ sub-components: FormulasEditor, CameraDbManager, LicenseTools, DebugTools
+- Extract ExportHistory component from ExportDialog
+- Add CamerasView component for cameras tab in Advanced mode
+- DevMenu refactored to use extracted sub-components
+
+0.1.94 -- Phase 9 Dev Menu
+
+- Dev Menu accessible via Cmd+Shift+D (Mac) / Ctrl+Shift+D (Win/Linux)
+- Easter egg: Settings > About > click version 7 times
+- Formulas section: title start time, J&L blend duration, score weights with sliders, watermark override
+- Camera DB section: view camera count, export JSON to clipboard
+- License Tools section: view current state, clear license, generate batch rental keys (1-100)
+- Debug section: test FFmpeg/FFprobe/ExifTool availability + version, clear caches, database stats, export schema, raw SQL (dev license only)
+- Backend: 6 new Tauri commands (test_ffmpeg, clear_caches, export_database, execute_raw_sql, generate_rental_keys, get_db_stats)
+- Full-page overlay UI following Braun Design Language with 4-section nav
+
+0.1.93 -- Wire BestClipsPanel to feature flag
+
+- BestClipsPanel now renders on WelcomeDashboard when bestClips flag is enabled and clips exist
+- Passed featureFlags from LibraryView through to WelcomeDashboard
+- When bestClips toggle is off in Advanced settings, the panel is hidden
+
+0.1.92 -- Phase 8 Feature Toggles (Advanced only)
+
+- Added "Features" section to Settings page with toggle switches for screen grabs, face detection, best clips, and cameras tab
+- Features nav item and toggle UI only visible in Advanced mode; entirely hidden in Simple mode
+- Toggle changes persist immediately to settings store via saveAppSettings
+- Switching to Simple mode while on Features tab auto-navigates back to General
+- Added feature-toggle CSS styles (toggle switch, row layout) following Braun Design Language
+
+0.1.91 -- Phase 7 Cameras tab: add Unknown bucket
+
+- Added "Unknown" camera bucket at bottom of Cameras nav section per spec
+- Renamed profiles group label to "Matched Profiles" for clarity
+
+0.1.90 -- Phase 7 LeftNav updates (Favorites link + Cameras tab)
+
+- Added Favorites nav link to LibrarySection; clicking navigates to clips view with favorites filter pre-applied
+- Active state highlight on Favorites link when favorites filter is active
+- Added Cameras tab to LeftNav, gated by mode === 'advanced' AND featureFlags.camerasTab === true
+- Cameras tab shows registered devices and matched profiles in collapsible section
+- Cameras tab hidden in Simple mode and when camerasTab flag is off
+- Passed mode and featureFlags through MainLayout to LeftNav for feature gating
+- Added nav-cameras CSS styles following Braun Design Language
+- TypeScript and Rust compile clean
+
+0.1.89 -- ImportDialog DRY cleanup
+
+- Deduplicated JobProgress, IngestResponse, CameraBreakdownEntry types into src/types/jobs.ts
+- ImportDialog now imports shared types instead of defining them inline
+- ImportDialog cancel uses cancelJob API wrapper instead of direct invoke
+
+0.1.88 -- Phase 6 audit minor fixes
+
+- Sidecar ingest timestamps now track per-stage (discovered_at, copied_at, indexed_at) instead of identical values
+- Import button pre-checks license before opening dialog; blocks with clear message if trial expired
+- Ingest progress now emits a "previews" phase label after file processing completes
+
+0.1.87 -- Phase 6 audit fixes
+
+- Sidecar JSON schema changed to nested structure per spec (metadata_snapshot, camera_match, ingest_timestamps, derived_asset_paths, rental_audit)
+- Per-file ingest progress now emits sub-phase indicators (copying, hashing, metadata, indexing) instead of generic "processing"
+- Removed unused state parameter from start_ingest command
+
+0.1.86 -- Import Dialog + sidecar JSON
+
+- Replaced bare import flow with Import Dialog (folder picker, event assignment, progress bar, summary)
+- Per-clip sidecar JSON written to .dadcam/sidecars/ during ingest (metadata snapshot, camera match, timestamps)
+- start_ingest now accepts event_id / new_event_name params; links imported clips to events
+- Camera breakdown tracked during ingest, shown in Advanced mode summary
+- Import blocked when trial expired (license check added)
+- Added SIDECARS_FOLDER constant and sidecars/ to library folder init
+
+0.1.85 -- Phase 5 minor fixes (matcher, fingerprint LIKE, import count)
+
+- Camera matcher: load profiles once before device loop instead of per-device (O(D*P) query reduction)
+- USB fingerprint LIKE pattern now includes closing quote delimiter for tighter SQL matching
+- import_camera_db and load_devices_from_json: only increment count on successful insert, log failures
+
+0.1.84 -- Phase 5 import/export symmetry and confidence constant
+
+- Fixed import_camera_db: now imports both profiles AND devices from combined export format (symmetric with export_camera_db)
+- import_camera_db still accepts plain array format (canonical.json) as fallback
+- Return type changed from u32 to ImportCameraDbResult { profilesImported, devicesImported }
+- Extracted camera match confidence threshold (0.5) to CAMERA_MATCH_MIN_CONFIDENCE constant
+
+0.1.83 -- Phase 5 audit fixes (7 items)
+
+- Fixed match_camera command: graceful fallback when original file is inaccessible (uses stored clip data)
+- Fixed match_camera command: removed dead code (unused codec query field)
+- Added custom_cameras.json sync: devices saved to ~/.dadcam/custom_cameras.json on registration, loaded on library open
+- Added auto-load bundled profiles: canonical.json loaded on both library open and create
+- Fixed USB fingerprint SQL search: escaped LIKE special characters to prevent false matches
+- Fixed Windows USB parsing: corrected operator precedence in VID/PID range slicing
+- Added container format matching: MediaMetadata.container populated from ffprobe format_name, matched in profile scoring
+
+0.1.82 -- v0.2.0 Phase 5: Camera System MVP
+
+- Migration 5: camera_devices table with uuid, serial_number, fleet_label, usb_fingerprints, rental_notes
+- Migration 5: clips table gets camera_device_id column for physical device tracking
+- Created camera/devices.rs: CameraDevice struct, CRUD ops, USB fingerprint capture (macOS/Windows/Linux)
+- Created camera/matcher.rs: unified 6-level matching engine (USB fingerprint > serial > make+model device > profile > filename > generic)
+- Created camera/bundled.rs: loads canonical.json bundled camera profiles into DB at startup
+- Created resources/cameras/canonical.json: empty array placeholder for bundled camera DB
+- Created commands/cameras.rs: 6 Tauri commands (list_camera_profiles, list_camera_devices, register_camera_device, match_camera, import_camera_db, export_camera_db)
+- register_camera_device gated by camera_registration license check (blocked when trial expired)
+- Ingest pipeline now calls unified matcher (device + profile) instead of profile-only matching
+- Ingest sets both camera_profile_id and camera_device_id on clips when matched
+- Added serial_number extraction to exiftool metadata (SerialNumber + InternalSerialNumber fields)
+- Added serial_number field to MediaMetadata struct
+- Created src/types/cameras.ts: CameraProfile, CameraDevice, RegisterDeviceParams, CameraMatchResult types
+- Created src/api/cameras.ts: 6 API wrapper functions
+- Rust and TypeScript compile clean
+
+---
+
+0.1.81 -- VHS Export audit fixes
+
+- Title overlay now starts at 5 seconds (was 0), duration 3 seconds (was 5), centered vertically (was bottom)
+- Title timing reads devMenu.titleStartSeconds, crossfade reads devMenu.jlBlendMs from settings
+- Default blend duration corrected to 500ms (was hardcoded 1000ms)
+- Event selector in ExportDialog is now a dropdown with event names (was raw numeric ID input)
+- Fixed single-clip no-audio export: null audio source now properly mapped with -map directives
+- Job runner export stub clarified (export runs via direct command, not job queue)
+
+---
+
+0.1.80 -- VHS Export MVP
+
+- Created src-tauri/src/export/ module: mod.rs, timeline.rs, ffmpeg_builder.rs, watermark.rs
+- Export orchestration: clip selection, FFmpeg filtergraph with xfade/acrossfade, atomic output
+- 5 selection modes: all, favorites, date_range, event, score threshold
+- 4 ordering modes: chronological, score_desc, score_asc, shuffle (seeded)
+- Conform filter normalizes all clips to 1920x1080/30fps/48kHz stereo before crossfade
+- Clips without audio get injected silence via anullsrc
+- Title overlay via drawtext filter with fade in/out
+- Watermark + 720p cap applied when trial expired (licensing::should_watermark)
+- Single-clip export falls back to simple transcode (no xfade needed)
+- Temp file with atomic rename on success, cleanup on cancel/error
+- Progress via FFmpeg stderr time= parsing, emitted as job-progress events
+- Cancel support via AtomicBool flag, kills FFmpeg child process
+- Migration 4: export_history table with status tracking
+- Created src-tauri/src/commands/export.rs: 3 Tauri commands (start_vhs_export, get_export_history, cancel_export)
+- Own DB connection for export (avoids holding shared Mutex during render)
+- Created src/types/export.ts: VhsExportParams, ExportHistoryEntry, SelectionMode, ExportOrdering
+- Created src/api/export.ts: startVhsExport, getExportHistory, cancelExport
+- Created src/components/ExportDialog.tsx: selection mode, ordering, title text, output path picker, progress bar, export history
+- Score threshold selection only visible in Advanced mode
+- Added VHS Export button to LibraryView toolbar (next to Import Footage)
+- Added rand = "0.8" to Cargo.toml for shuffle ordering
+- Added export dialog CSS following Braun Design Language
+- Rust and TypeScript compile clean
+
+0.1.79 -- Phase 3 audit fixes (round 2)
+
+- deactivate_license now returns LicenseState (was void) so frontend can sync cache after deactivation
+- Removed unused serde import from commands/licensing.rs
+- App startup now syncs licenseStateCache in settings if stale vs live keychain state (crash resilience)
+- deactivateLicense TypeScript API updated to return LicenseState
+
+0.1.78 -- Phase 3 audit fixes
+
+- Trial banner now shows on all screens (welcome, unmounted, dashboard, settings), not just when a library is open
+- License state cache in settings JSON now syncs after activation/deactivation
+
+0.1.77 -- v0.2.0 Phase 3: Licensing System
+
+- Created src-tauri/src/licensing/mod.rs: offline license validation via BLAKE3 keyed hash
+- License types: trial (14-day), purchased (DCAM-P-), rental (DCAM-R-), dev (DCAM-D-)
+- Keys stored in OS keychain via keyring crate (never in settings file)
+- Trial start date stored in keychain, auto-created on first launch
+- Soft lock after trial: can browse/view library, cannot import/score/register cameras
+- Feature gating: is_allowed() checks per feature, watermark flag for expired exports
+- Key generation: generate_key() and generate_rental_keys() for dev menu use
+- Created src-tauri/src/commands/licensing.rs: 4 Tauri commands (get_license_state, activate_license, deactivate_license, is_feature_allowed)
+- Added License error variant to error.rs
+- Added keyring = "2" to Cargo.toml
+- Created src/types/licensing.ts: LicenseState, LicenseType, GatedFeature types
+- Created src/api/licensing.ts: getLicenseState, activateLicense, deactivateLicense, isFeatureAllowed
+- Created src/components/TrialBanner.tsx: trial countdown bar with "Enter License Key" CTA
+- Created src/components/modals/LicenseKeyModal.tsx: key entry with validation feedback
+- App.tsx loads license state on startup, renders TrialBanner when in trial
+- Added trial-banner and license-key-modal CSS following Braun Design Language
+- Unit tests for key generation, validation, tampering rejection, trial day calculation
+- Rust and TypeScript compile clean
+
+0.1.76 -- Phase 2 audit fix: runner ingest passes app + cancel through
+
+- runner.rs run_ingest_job now passes Option<AppHandle> through to ingest (was ignored as _app)
+- When app is available (Tauri context), uses run_ingest_job_with_progress for per-file progress events
+- Registers and cleans up cancel flag in the queue runner path, not just the direct start_ingest path
+- Queue runner ingest jobs now support both progress emission and cancellation
+- Build compiles clean
+
+0.1.75 -- Phase 2 audit fixes: consolidate progress plumbing
+
+- Consolidated run_ingest_job and run_ingest_job_with_progress into one code path (run_ingest_job_inner) -- eliminates duplicate ingest logic
+- Added emit_progress_opt() helper for optional AppHandle (no-op when None, e.g. CLI context)
+- runner.rs now accepts Option<AppHandle> and emits job-progress events for all job types: ingest, hash_full, proxy, thumb, sprite, score
+- Each job type emits starting phase progress with descriptive message
+- run_next_job emits completion/error progress after every job
+- Updated all CLI call sites (cli.rs) to pass None for the new app parameter
+- Removed unused heartbeat_job import from runner.rs
+- Build compiles clean
+
+0.1.74 -- v0.2.0 Phase 2: Unified Job Progress/Cancel Plumbing
+
+- Created src-tauri/src/jobs/progress.rs: JobProgress struct with phase, current/total, percent, message, cancel/error flags
+- emit_progress() helper sends "job-progress" Tauri event to frontend
+- Cancel infrastructure: register_cancel_flag, request_cancel, remove_cancel_flag, is_cancelled in jobs/mod.rs
+- Cancel flags use AtomicBool in a global HashMap keyed by job_id string
+- Added run_ingest_job_with_progress() to ingest/mod.rs: emits per-file progress and checks cancel flag between files
+- start_ingest command now accepts AppHandle, registers cancel flag, emits progress events
+- Added cancel_job Tauri command (registered in handler list)
+- Created src/types/jobs.ts: TypeScript JobProgress interface matching Rust struct
+- Created src/api/jobs.ts: cancelJob() wrapper calling cancel_job command
+- Rust and TypeScript compile clean
+
+0.1.73 -- Phase 1 audit fixes
+
+- FirstRunWizard now has 2 steps: mode selection then folder picker (Simple mode)
+- Simple wizard step 2 creates Default Project at chosen folder via native picker
+- Advanced wizard skips step 2 (dashboard shown by normal routing)
+- Skip link allows Simple users to defer project setup
+- SettingsPanel mode change now updates featureFlags in local state (matches SettingsView behavior)
+
+0.1.72 -- v0.2.0 Phase 1: Settings v2 + First Run Wizard
+
+- Settings schema upgraded from v1 to v2 with automatic migration
+- Renamed mode: personal/pro -> simple/advanced (data + types + all references)
+- Renamed recentLibraries -> recentProjects, lastLibraryPath -> defaultProjectPath
+- Added new settings fields: firstRunCompleted, theme, featureFlags, devMenu, licenseStateCache
+- FeatureFlags struct with mode-dependent defaults (face_detection off in Simple, on in Advanced)
+- DevMenuSettings struct with scoreWeights, titleStartSeconds, jlBlendMs, watermarkText
+- LicenseStateCache struct for non-secret license summary
+- v1->v2 migration: maps old personal->simple, pro->advanced, recentLibraries->recentProjects
+- Existing v1 users get firstRunCompleted=true (skip wizard), new users get false
+- Old v1 store keys cleaned up after migration
+- Created FirstRunWizard component shown on first launch (mode selection + Get Started)
+- App.tsx gates on firstRunCompleted before showing any other view
+- Theme class applied to document root from settings.theme
+- All 7 affected frontend files updated: App.tsx, SettingsView, SettingsPanel, LibraryView, LibraryDashboard, LibraryCard, api/settings
+- TypeScript and Rust both compile clean
+
+0.1.71 -- v0.2.0 Implementation Guide v3 (beginner-oriented rewrite)
+
+- Full rewrite of implementation guide for newer developers
+- Added Getting Started section with build/run instructions and Tauri architecture explanation
+- Added FFmpeg bundling strategy section with per-platform details
+- Made trial start logic more prominent per master plan Migration section
+- Added explicit master plan section references to every step header
+- All source claims re-verified: 38 commands, 17 tables, 28 components, package versions
+- 70+ testing checklist items across 9 categories
+
+0.1.70 -- v0.2.0 Implementation Guide v2 (full source audit)
+
+- Complete rewrite of v0.2.0 implementation guide with line-by-line source verification
+- Corrected table count: 17 tables (was 15), verified from migrations.rs
+- Verified 38 Tauri commands from lib.rs generate_handler macro
+- Verified 28 components (21 root + 3 modals + 4 nav) via filesystem listing
+- Verified settings.rs: SETTINGS_VERSION=1, AppMode=Personal/Pro, 4-field AppSettings
+- Verified Cargo.toml dependencies against guide claims
+- Added full table inventory with per-table purposes for all 17 tables
+- Added "Gotchas for new devs" section to every implementation step
+- Added exact App.tsx insertion point for first-run wizard gate
+- Added full "Adding a new command module" 5-step process
+- Added Tauri event listener pattern for React useEffect cleanup
+- Added note about init_library_folders needing sidecars/ directory
+- Added master plan section references to every step header
+- Added audit notes section with per-file verification table
+- Cross-referenced all 19 master plan sections to guide steps
+- 70+ testing checklist items across 9 categories
+
+---
+
+0.1.69 -- v0.2.0 Implementation Guide rewrite (full audit)
+
+- Complete rewrite of v0.2.0 implementation guide from master plan audit
+- Verified all 38 Tauri commands in lib.rs (previous guide said 40, corrected)
+- Verified all 3 migrations, 15 tables, 28 components against actual source files
+- Added explicit Cargo.toml dependency list (keyring needed for licensing)
+- Added dev environment setup context (exact Rust structs from settings.rs)
+- Added concrete FFmpeg filtergraph examples for VHS crossfade pipeline
+- Added conform filter chain (resolution/fps/SAR normalization before xfade)
+- Added new files summary table (14 Rust, 20 TypeScript, 1 resource)
+- Added new commands summary (25 new commands across 6 modules, total 63 after v0.2.0)
+- Added 2 new database migrations table (Migration 4: export_history, Migration 5: camera_devices)
+- Expanded testing checklist to 70+ items across 9 categories
+- Cross-referenced every master plan section to exact source file paths
+- Decisions log carried from master plan with explicit "do not revisit" note
+- Written for developers new to the codebase with prerequisite reading order
+
+---
+
+0.1.68 -- Implementation Guide fixes (7 issues)
+
+- Fixed component count (33 -> 28) and added missing SettingsPanel.tsx to layout
+- Fixed command count (38 -> 40)
+- Moved Sidecars section into Step 6 (Import Dialog) where it is built, not floating between steps
+- Clarified camera_profile_id already exists on clips, only camera_device_id is new in Migration 5
+- Clarified terminology rename: data structures rename in Step 1, UI text and CSS deferred to end
+- Added export dialog navigation path (VHS Export button in LibraryView toolbar)
+- Added migration numbering notes for Migrations 4 and 5
+- Added sidecar verification items to Step 6 verify list
+- Noted key entry modal CTA linkage extends master plan
+
+0.1.67 -- v0.2.0 Implementation Guide Audit Pass
+
+- Audited implementation guide against master plan line-by-line (12 gaps found, all fixed)
+- Added first-run wizard (was missing entirely -- master plan deliverable #1)
+- Added Sidecars & Metadata section (sidecar location, JSON schema, EXIF dump)
+- Added scope boundaries: "Not in v0.2.0" list and hardware in/out of scope
+- Added "Project" terminology convention (user-facing vs internal "library")
+- Added Simple = single project, Advanced = multiple projects
+- Added 8-step per-file import pipeline sequence
+- Added standalone key entry modal (accessible from trial banner CTA, not just dev menu)
+- Added "Export EXIF dump" to dev menu debug section
+- Fixed score threshold selection as Advanced-only
+- Fixed 720p cap to specify "1280x720 max"
+- Expanded soft lock CAN list (open projects, best-clips if already computed)
+- Added missing contracts 4 (cross-platform) and 6 (export originals = file copy)
+- Added 13 new test checklist items (wizard, sidecars, trial banner, key modal)
+
+---
+
+0.1.66 -- v0.2.0 Implementation Guide
+
+- Created developer-facing implementation guide for v0.2.0 (docs/planning/v0.2.0-implementation-guide.md)
+- 11-step walkthrough in dependency order with exact file paths, code patterns, and verify steps
+- Audited against current codebase: 38 existing commands, 15 tables, 33 components
+- Cross-referenced all contracts, settings types, migrations, and constants
+- Includes must-pass testing checklist covering licensing, import, export, cameras, migration, cross-platform, and dev menu
+- Written for developers new to the codebase
+
+---
+
+0.1.65 — v0.2.0 Master Plan (Final)
+
+- Rewrote v0.2.0 master plan after full codebase audit (39 Rust, 43 TS files)
+- Proper backend/frontend checklists mapped to specific files
+- Fixed implementation order: settings > licensing > VHS export > import > cameras > nav > wizard > toggles > dev menu > USB > theme > rename last
+- Removed FavoritesView.tsx (use nav link with existing ClipGrid filter)
+- Fixed feature toggle contradiction (face detection off in Simple for low-end PCs)
+- Confirmed VHS export is all new (job runner stub says "not yet implemented")
+- Added existing user migration plan (v1>v2 settings, trial starts fresh)
+- Gated raw SQL behind DCAM-D license key
+- Added testing notes for licensing, trial flow, soft lock, keychain
+- canonical.json source TBD, system works without it
+- Terminology rename moved to step 12 (biggest diff, zero user value, do last)
+
+---
+
+0.1.64 — Light Mode Default
+
+- Switched app to light mode as default (dark mode for Advanced users only)
+- Added CSS variables for theme-aware hover overlays (--hover-overlay)
+- Added :root.dark-mode class for dark theme support
+- Light mode colors: canvas #FAFAF8, surface #FFFFFF, text rgba(10,10,11,0.87)
+- Updated functional colors for better light mode contrast
+- Fixed modal/dialog shadows for light mode
+
+---
+
+0.1.63 — Licensing & Business Strategy (v2.0.0)
+
+- Complete strategic analysis of monetization and anti-piracy
+- Philosophy: "Don't fight piracy. Make buying easier than pirating."
+- Business model:
+  - 14-day trial (full features, then soft lock)
+  - $99 one-time purchase (no subscription)
+  - Free for rental clients (pre-generated keys)
+- Soft lock when expired:
+  - CAN view/browse library
+  - CANNOT import, export, auto-edit
+  - Watermark on exports
+- Anti-piracy: Light friction, not DRM
+  - Machine ID (survives reinstall)
+  - Obfuscated checks (multiple locations)
+  - Accept that determined pirates will crack it
+- Gumroad recommended for payments (handles everything)
+- Dev menu: Cmd+Shift+D for backend tools, key generation
+- Camera database bundled (7,500+ cameras), updates with app
+- See docs/planning/pro-register-camera.md
+
+---
+
 0.1.62 — Settings Page (Braun D.5.8)
 
 - Moved settings from modal to dedicated full page per Braun spec D.5.8

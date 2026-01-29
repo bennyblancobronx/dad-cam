@@ -1,11 +1,11 @@
-// Dad Cam - Library Card Component (Pro Mode)
-// Card display for libraries in the LibraryDashboard grid
+// Dad Cam - Project Card Component (Advanced Mode)
+// Card display for projects in the Project Dashboard grid
 
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { RecentLibrary } from '../types/settings';
+import { RecentProject } from '../types/settings';
 
 interface LibraryCardProps {
-  library: RecentLibrary;
+  library: RecentProject;
   onSelect: () => void;
   isLoading?: boolean;
   isSelected?: boolean;

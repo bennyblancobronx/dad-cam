@@ -2,7 +2,7 @@
 // Calls to Tauri backend for app settings persistence
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AppSettings, AppMode, RecentLibrary } from '../types/settings';
+import type { AppSettings, AppMode, RecentProject } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 
 /** Get app settings from persistent store */
@@ -31,7 +31,7 @@ export async function setMode(mode: AppMode): Promise<void> {
   await invoke('set_mode', { mode });
 }
 
-/** Add or update a recent library entry */
+/** Add or update a recent project entry */
 export async function addRecentLibrary(
   path: string,
   name: string,
@@ -40,14 +40,14 @@ export async function addRecentLibrary(
   await invoke('add_recent_library', { path, name, clipCount });
 }
 
-/** Remove a library from recent list */
+/** Remove a project from recent list */
 export async function removeRecentLibrary(path: string): Promise<void> {
   await invoke('remove_recent_library', { path });
 }
 
-/** Get recent libraries list */
-export async function getRecentLibraries(): Promise<RecentLibrary[]> {
-  return await invoke<RecentLibrary[]>('get_recent_libraries');
+/** Get recent projects list */
+export async function getRecentLibraries(): Promise<RecentProject[]> {
+  return await invoke<RecentProject[]>('get_recent_libraries');
 }
 
 /** Validate if a library path exists and is valid */

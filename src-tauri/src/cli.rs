@@ -459,7 +459,7 @@ fn cmd_jobs(library: Option<PathBuf>, cancel: Option<i64>, run: bool, status: Op
     // Handle run
     if run {
         println!("Running pending jobs...");
-        let count = runner::run_all_jobs(&conn, &library_root)?;
+        let count = runner::run_all_jobs(&conn, &library_root, None)?;
         println!("Completed {} jobs", count);
         return Ok(());
     }
@@ -732,7 +732,7 @@ fn cmd_preview(library: Option<PathBuf>, preview_type: String, clip_id: Option<i
         }
 
         // Run jobs immediately
-        let count = runner::run_all_jobs(&conn, &library_root)?;
+        let count = runner::run_all_jobs(&conn, &library_root, None)?;
         println!("Completed {} preview jobs", count);
 
         return Ok(());
@@ -769,7 +769,7 @@ fn cmd_preview(library: Option<PathBuf>, preview_type: String, clip_id: Option<i
     println!();
     println!("Running {} preview jobs...", total_queued);
 
-    let count = runner::run_all_jobs(&conn, &library_root)?;
+    let count = runner::run_all_jobs(&conn, &library_root, None)?;
     println!("Completed {} preview jobs", count);
 
     Ok(())

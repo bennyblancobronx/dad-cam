@@ -111,7 +111,7 @@ export function EventView({
     return (
       <div className="event-view">
         <div className="event-view-header">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>
@@ -129,7 +129,7 @@ export function EventView({
     return (
       <div className="event-view">
         <div className="event-view-header">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>
@@ -157,7 +157,7 @@ export function EventView({
     <div className="event-view">
       <div className="event-view-header">
         <div className="event-view-header-left">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>

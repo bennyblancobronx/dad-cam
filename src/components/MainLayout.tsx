@@ -3,6 +3,7 @@
 
 import type { ReactNode } from 'react';
 import type { LibraryInfo } from '../types/clips';
+import type { AppMode, FeatureFlags } from '../types/settings';
 import { LeftNav } from './LeftNav';
 
 interface MainLayoutProps {
@@ -10,10 +11,17 @@ interface MainLayoutProps {
   onNavigateToSettings: () => void;
   onNavigateToEvent?: (eventId: number) => void;
   onNavigateToDate?: (date: string) => void;
+  onNavigateToFavorites?: () => void;
   /** Currently active date for highlighting in nav */
   activeDate?: string | null;
+  /** Whether favorites view is currently active */
+  isFavoritesActive?: boolean;
   /** Increment to trigger dates refresh */
   refreshTrigger?: number;
+  /** App mode for gating nav features */
+  mode?: AppMode;
+  /** Feature flags for gating nav features */
+  featureFlags?: FeatureFlags;
   /** Header content (back button, title, actions) */
   header?: ReactNode;
   /** Main content area */
@@ -25,8 +33,12 @@ export function MainLayout({
   onNavigateToSettings,
   onNavigateToEvent,
   onNavigateToDate,
+  onNavigateToFavorites,
   activeDate,
+  isFavoritesActive,
   refreshTrigger,
+  mode,
+  featureFlags,
   header,
   children,
 }: MainLayoutProps) {
@@ -37,8 +49,12 @@ export function MainLayout({
         onNavigateToSettings={onNavigateToSettings}
         onNavigateToEvent={onNavigateToEvent}
         onNavigateToDate={onNavigateToDate}
+        onNavigateToFavorites={onNavigateToFavorites}
         activeDate={activeDate}
+        isFavoritesActive={isFavoritesActive}
         refreshTrigger={refreshTrigger}
+        mode={mode}
+        featureFlags={featureFlags}
       />
       <div className="main-content">
         {header && <header className="main-header">{header}</header>}

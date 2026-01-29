@@ -2,16 +2,19 @@
 
 use std::path::Path;
 use rusqlite::Connection;
+use tauri::AppHandle;
 use crate::db::schema;
-use crate::jobs::{claim_job, complete_job, fail_job, heartbeat_job, reclaim_expired_jobs};
+use crate::jobs::{claim_job, complete_job, fail_job, reclaim_expired_jobs};
+use crate::jobs::progress::{JobProgress, emit_progress_opt};
 use crate::ingest;
 use crate::preview;
 use crate::scoring;
 use crate::error::{DadCamError, Result};
 use crate::constants::PIPELINE_VERSION;
 
-/// Run a single job from the queue
-pub fn run_next_job(conn: &Connection, library_root: &Path) -> Result<bool> {
+/// Run a single job from the queue.
+/// When app is Some, emits job-progress events to the frontend.
+pub fn run_next_job(conn: &Connection, library_root: &Path, app: Option<&AppHandle>) -> Result<bool> {
     // First reclaim any expired jobs
     let reclaimed = reclaim_expired_jobs(conn)?;
     if reclaimed > 0 {
@@ -25,51 +28,77 @@ pub fn run_next_job(conn: &Connection, library_root: &Path) -> Result<bool> {
     };
 
     let run_token = job.run_token.clone().unwrap_or_default();
+    let job_id_str = job.id.to_string();
 
     eprintln!("Running job {} (type: {})", job.id, job.job_type);
 
+    // Emit starting progress
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, &job.job_type, 0, 1)
+        .with_message(format!("Starting {} job", job.job_type)));
+
     // Execute based on job type
     let result = match job.job_type.as_str() {
-        "ingest" => run_ingest_job(conn, &job, library_root),
-        "hash_full" => run_hash_full_job(conn, &job),
-        "proxy" => run_proxy_job(conn, &job, library_root),
-        "thumb" => run_thumb_job(conn, &job, library_root),
-        "sprite" => run_sprite_job(conn, &job, library_root),
-        "score" => run_score_job(conn, &job, library_root),
-        "export" | "ml" => {
-            // Phase 5+ jobs - not implemented yet
+        "ingest" => run_ingest_job(conn, &job, library_root, app),
+        "hash_full" => run_hash_full_job(conn, &job, app),
+        "proxy" => run_proxy_job(conn, &job, library_root, app),
+        "thumb" => run_thumb_job(conn, &job, library_root, app),
+        "sprite" => run_sprite_job(conn, &job, library_root, app),
+        "score" => run_score_job(conn, &job, library_root, app),
+        "export" => {
+            // VHS export is invoked directly via start_vhs_export command, not through the job queue.
+            Err(DadCamError::Other("Export jobs run via start_vhs_export command, not the job queue".to_string()))
+        }
+        "ml" => {
             Err(DadCamError::Other(format!("Job type '{}' not yet implemented", job.job_type)))
         }
         _ => Err(DadCamError::Other(format!("Unknown job type: {}", job.job_type))),
     };
 
-    // Update job status
+    // Update job status and emit completion/error
     match result {
         Ok(_) => {
             complete_job(conn, job.id, &run_token)?;
+            emit_progress_opt(app, &JobProgress::new(&job_id_str, "complete", 1, 1)
+                .with_message(format!("{} job completed", job.job_type)));
             eprintln!("Job {} completed successfully", job.id);
         }
-        Err(e) => {
+        Err(ref e) => {
             fail_job(conn, job.id, &run_token, &e.to_string())?;
+            emit_progress_opt(app, &JobProgress::new(&job_id_str, "failed", 0, 1)
+                .error(e.to_string()));
             eprintln!("Job {} failed: {}", job.id, e);
         }
     }
 
-    Ok(true)
+    // Propagate error after recording it
+    result.map(|_| true)
 }
 
-/// Run all pending jobs
-pub fn run_all_jobs(conn: &Connection, library_root: &Path) -> Result<usize> {
+/// Run all pending jobs.
+/// When app is Some, emits job-progress events to the frontend.
+pub fn run_all_jobs(conn: &Connection, library_root: &Path, app: Option<&AppHandle>) -> Result<usize> {
     let mut count = 0;
-    while run_next_job(conn, library_root)? {
+    while run_next_job(conn, library_root, app)? {
         count += 1;
     }
     Ok(count)
 }
 
 /// Run an ingest job
-fn run_ingest_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
-    let result = ingest::run_ingest_job(conn, job.id, library_root)?;
+fn run_ingest_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
+    let job_id_str = job.id.to_string();
+
+    // Register cancel flag so this job can be cancelled
+    let cancel_flag = crate::jobs::register_cancel_flag(&job_id_str);
+
+    let result = match app {
+        Some(app_handle) => ingest::run_ingest_job_with_progress(conn, job.id, library_root, app_handle, &cancel_flag),
+        None => ingest::run_ingest_job(conn, job.id, library_root),
+    };
+
+    crate::jobs::remove_cancel_flag(&job_id_str);
+
+    let result = result?;
 
     eprintln!(
         "Ingest complete: {} processed, {} skipped, {} failed",
@@ -84,9 +113,10 @@ fn run_ingest_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> 
 }
 
 /// Run a full hash job
-fn run_hash_full_job(conn: &Connection, job: &schema::Job) -> Result<()> {
+fn run_hash_full_job(conn: &Connection, job: &schema::Job, app: Option<&AppHandle>) -> Result<()> {
     let asset_id = job.asset_id
         .ok_or_else(|| DadCamError::Other("Hash job has no asset_id".to_string()))?;
+    let job_id_str = job.id.to_string();
 
     let asset = schema::get_asset(conn, asset_id)?
         .ok_or_else(|| DadCamError::AssetNotFound(asset_id))?;
@@ -100,6 +130,9 @@ fn run_hash_full_job(conn: &Connection, job: &schema::Job) -> Result<()> {
     if !full_path.exists() {
         return Err(DadCamError::FileNotFound(full_path.to_string_lossy().to_string()));
     }
+
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, "hashing", 0, 1)
+        .with_message("Computing full file hash"));
 
     // Compute full hash
     let hash_full = crate::hash::compute_full_hash(&full_path)?;
@@ -125,9 +158,10 @@ pub fn count_pending_jobs(conn: &Connection) -> Result<Vec<(String, i64)>> {
 }
 
 /// Run a proxy generation job
-fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
     let clip_id = job.clip_id
         .ok_or_else(|| DadCamError::Other("Proxy job has no clip_id".to_string()))?;
+    let job_id_str = job.id.to_string();
 
     // Get clip and its original asset
     let clip = schema::get_clip(conn, clip_id)?
@@ -141,6 +175,9 @@ fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> R
     if !source_path.exists() {
         return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
     }
+
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, "proxy", 0, 1)
+        .with_message(format!("Generating proxy for clip {}", clip_id)));
 
     // Determine parameters based on media type
     let deinterlace = if clip.media_type == "video" {
@@ -220,9 +257,10 @@ fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> R
 }
 
 /// Run a thumbnail generation job
-fn run_thumb_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+fn run_thumb_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
     let clip_id = job.clip_id
         .ok_or_else(|| DadCamError::Other("Thumb job has no clip_id".to_string()))?;
+    let job_id_str = job.id.to_string();
 
     let clip = schema::get_clip(conn, clip_id)?
         .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
@@ -234,6 +272,9 @@ fn run_thumb_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> R
     if !source_path.exists() {
         return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
     }
+
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, "thumb", 0, 1)
+        .with_message(format!("Generating thumbnail for clip {}", clip_id)));
 
     // Create params (include camera_profile_id and source hash)
     let params = preview::DerivedParams::for_thumb(
@@ -304,9 +345,10 @@ fn run_thumb_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> R
 }
 
 /// Run a sprite sheet generation job
-fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
     let clip_id = job.clip_id
         .ok_or_else(|| DadCamError::Other("Sprite job has no clip_id".to_string()))?;
+    let job_id_str = job.id.to_string();
 
     let clip = schema::get_clip(conn, clip_id)?
         .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
@@ -327,6 +369,9 @@ fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> 
     if !source_path.exists() {
         return Err(DadCamError::FileNotFound(source_path.to_string_lossy().to_string()));
     }
+
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, "sprite", 0, 1)
+        .with_message(format!("Generating sprite sheet for clip {}", clip_id)));
 
     // Create params (include camera_profile_id and source hash)
     let params = preview::DerivedParams::for_sprite(
@@ -397,9 +442,10 @@ fn run_sprite_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> 
 }
 
 /// Run a scoring job
-fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
     let clip_id = job.clip_id
         .ok_or_else(|| DadCamError::Other("Score job has no clip_id".to_string()))?;
+    let job_id_str = job.id.to_string();
 
     let clip = schema::get_clip(conn, clip_id)?
         .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
@@ -409,6 +455,9 @@ fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> R
         eprintln!("Clip {} already has up-to-date score", clip_id);
         return Ok(());
     }
+
+    emit_progress_opt(app, &JobProgress::new(&job_id_str, "scoring", 0, 1)
+        .with_message(format!("Scoring clip {}", clip_id)));
 
     // Run analysis
     let result = scoring::analyzer::analyze_clip(conn, clip_id, library_root, false)?;

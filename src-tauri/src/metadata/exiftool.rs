@@ -10,6 +10,7 @@ pub struct ExifMetadata {
     pub recorded_at: Option<String>,
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
+    pub serial_number: Option<String>,
     pub gps_latitude: Option<f64>,
     pub gps_longitude: Option<f64>,
 }
@@ -26,6 +27,10 @@ struct ExifToolOutput {
     make: Option<String>,
     #[serde(rename = "Model")]
     model: Option<String>,
+    #[serde(rename = "SerialNumber")]
+    serial_number: Option<String>,
+    #[serde(rename = "InternalSerialNumber")]
+    internal_serial_number: Option<String>,
     #[serde(rename = "GPSLatitude")]
     gps_latitude: Option<String>,
     #[serde(rename = "GPSLongitude")]
@@ -42,6 +47,8 @@ pub fn extract(path: &Path) -> Result<ExifMetadata> {
             "-MediaCreateDate",
             "-Make",
             "-Model",
+            "-SerialNumber",
+            "-InternalSerialNumber",
             "-GPSLatitude",
             "-GPSLongitude",
         ])
@@ -69,6 +76,7 @@ pub fn extract(path: &Path) -> Result<ExifMetadata> {
     meta.recorded_at = raw_date.and_then(|d| parse_exif_date(&d));
     meta.camera_make = exif.make;
     meta.camera_model = exif.model;
+    meta.serial_number = exif.serial_number.or(exif.internal_serial_number);
 
     // Parse GPS if available
     if let Some(lat_str) = exif.gps_latitude {
@@ -146,6 +154,8 @@ impl Default for ExifToolOutput {
             media_create_date: None,
             make: None,
             model: None,
+            serial_number: None,
+            internal_serial_number: None,
             gps_latitude: None,
             gps_longitude: None,
         }

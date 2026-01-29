@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { LibraryInfo } from './types/clips';
 import type { AppSettings } from './types/settings';
+import type { LicenseState } from './types/licensing';
 import { DEFAULT_SETTINGS } from './types/settings';
 import { openLibrary, closeLibrary, createLibrary } from './api/clips';
 import {
@@ -11,10 +12,14 @@ import {
   validateLibraryPath,
   removeRecentLibrary,
 } from './api/settings';
+import { getLicenseState } from './api/licensing';
 import { clearThumbnailCache } from './utils/thumbnailCache';
 import { LibraryView } from './components/LibraryView';
 import { LibraryDashboard } from './components/LibraryDashboard';
 import { SettingsView } from './components/SettingsView';
+import { FirstRunWizard } from './components/FirstRunWizard';
+import { TrialBanner } from './components/TrialBanner';
+import { DevMenu } from './components/DevMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
@@ -28,6 +33,7 @@ function App() {
   // Core state
   const [library, setLibrary] = useState<LibraryInfo | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [license, setLicense] = useState<LicenseState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,61 +45,139 @@ function App() {
   // Error recovery state
   const [unmountedLibrary, setUnmountedLibrary] = useState<UnmountedLibrary | null>(null);
 
-  // App-level view state for Pro mode settings
+  // App-level view state for Advanced mode settings
   const [showAppSettings, setShowAppSettings] = useState(false);
+
+  // Dev menu state
+  const [showDevMenu, setShowDevMenu] = useState(false);
 
   // Load settings and auto-open library on mount
   useEffect(() => {
     loadAppSettings();
   }, []);
 
+  // Keyboard shortcut: Cmd+Shift+D (Mac) / Ctrl+Shift+D (Win/Linux) for Dev Menu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        setShowDevMenu((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Apply theme class when settings change
+  useEffect(() => {
+    if (settings) {
+      document.documentElement.classList.toggle('dark-mode', settings.theme === 'dark');
+    }
+  }, [settings?.theme]);
+
   async function loadAppSettings() {
     setIsLoading(true);
     setError(null);
 
     try {
-      const appSettings = await getAppSettings();
+      let appSettings = await getAppSettings();
       setSettings(appSettings);
 
-      // Personal mode: auto-open last library if set
-      if (appSettings.mode === 'personal' && appSettings.lastLibraryPath) {
-        const isValid = await validateLibraryPath(appSettings.lastLibraryPath);
+      // Load license state and sync cache in settings if stale
+      try {
+        const licenseState = await getLicenseState();
+        setLicense(licenseState);
+
+        // Sync licenseStateCache in settings if it differs from live state
+        const cache = appSettings.licenseStateCache;
+        if (
+          !cache ||
+          cache.licenseType !== licenseState.licenseType ||
+          cache.isActive !== licenseState.isActive ||
+          cache.daysRemaining !== licenseState.trialDaysRemaining
+        ) {
+          const { saveAppSettings } = await import('./api/settings');
+          const synced: AppSettings = {
+            ...appSettings,
+            licenseStateCache: {
+              licenseType: licenseState.licenseType,
+              isActive: licenseState.isActive,
+              daysRemaining: licenseState.trialDaysRemaining,
+            },
+          };
+          await saveAppSettings(synced);
+          appSettings = synced;
+          setSettings(synced);
+        }
+      } catch (err) {
+        console.error('Failed to load license state:', err);
+      }
+
+      // Simple mode: auto-open last project if set
+      if (appSettings.mode === 'simple' && appSettings.defaultProjectPath) {
+        const isValid = await validateLibraryPath(appSettings.defaultProjectPath);
 
         if (isValid) {
           try {
-            const lib = await openLibrary(appSettings.lastLibraryPath);
+            const lib = await openLibrary(appSettings.defaultProjectPath);
             clearThumbnailCache();
             setLibrary(lib);
           } catch (err) {
-            // Library exists but failed to open (corrupted?)
             console.error('Failed to auto-open library:', err);
             setError(
               typeof err === 'string'
                 ? err
                 : err instanceof Error
                 ? err.message
-                : 'Failed to open library'
+                : 'Failed to open project'
             );
           }
         } else {
-          // Library path doesn't exist (unmounted drive or deleted)
-          const recentLib = appSettings.recentLibraries.find(
-            (r) => r.path === appSettings.lastLibraryPath
+          const recentProject = appSettings.recentProjects.find(
+            (r) => r.path === appSettings.defaultProjectPath
           );
           setUnmountedLibrary({
-            path: appSettings.lastLibraryPath,
-            name: recentLib?.name || 'Unknown Library',
+            path: appSettings.defaultProjectPath,
+            name: recentProject?.name || 'Unknown Project',
           });
         }
       }
     } catch (err) {
-      // Settings file corrupted - reset to defaults
       console.error('Failed to load settings, using defaults:', err);
       setSettings(DEFAULT_SETTINGS);
     } finally {
       setIsLoading(false);
     }
   }
+
+  // Handle wizard completion
+  const handleWizardComplete = useCallback((updatedSettings: AppSettings) => {
+    setSettings(updatedSettings);
+  }, []);
+
+  // Handle license state change (activation/deactivation) -- update both state and settings cache
+  const handleLicenseChange = useCallback(async (newLicense: LicenseState) => {
+    setLicense(newLicense);
+
+    // Sync licenseStateCache in settings
+    if (settings) {
+      const updated: AppSettings = {
+        ...settings,
+        licenseStateCache: {
+          licenseType: newLicense.licenseType,
+          isActive: newLicense.isActive,
+          daysRemaining: newLicense.trialDaysRemaining,
+        },
+      };
+      try {
+        const { saveAppSettings } = await import('./api/settings');
+        await saveAppSettings(updated);
+        setSettings(updated);
+      } catch (err) {
+        console.error('Failed to update license cache in settings:', err);
+      }
+    }
+  }, [settings]);
 
   // Retry opening unmounted library
   const handleRetryUnmounted = useCallback(async () => {
@@ -111,11 +195,11 @@ function App() {
         setLibrary(lib);
         setUnmountedLibrary(null);
       } else {
-        setError('Library is still not available. Please check the drive is connected.');
+        setError('Project is still not available. Please check the drive is connected.');
       }
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open project'
       );
     } finally {
       setIsLoading(false);
@@ -129,7 +213,6 @@ function App() {
     try {
       await removeRecentLibrary(unmountedLibrary.path);
       setUnmountedLibrary(null);
-      // Reload settings to get updated recent libraries
       const appSettings = await getAppSettings();
       setSettings(appSettings);
     } catch (err) {
@@ -144,15 +227,13 @@ function App() {
     setUnmountedLibrary(null);
 
     try {
-      // Open native folder picker dialog
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Dad Cam Library',
+        title: 'Select Dad Cam Project',
       });
 
       if (!selected) {
-        // User cancelled
         setIsLoading(false);
         return;
       }
@@ -162,15 +243,12 @@ function App() {
       setLibrary(lib);
       setLibraryPath(selected as string);
 
-      // Add to recent libraries (saves settings)
       await addRecentLibrary(selected as string, lib.name, lib.clipCount);
-
-      // Update local settings state
       const updatedSettings = await getAppSettings();
       setSettings(updatedSettings);
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to open project'
       );
     } finally {
       setIsLoading(false);
@@ -183,7 +261,7 @@ function App() {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Select Folder for New Library',
+        title: 'Select Folder for New Project',
       });
       if (selected) {
         setLibraryPath(selected as string);
@@ -196,7 +274,7 @@ function App() {
   // Create new library
   const handleCreateLibrary = useCallback(async () => {
     if (!libraryPath.trim() || !newLibraryName.trim()) {
-      setError('Please select a folder and enter a library name');
+      setError('Please select a folder and enter a project name');
       return;
     }
 
@@ -210,15 +288,12 @@ function App() {
       setLibrary(lib);
       setShowCreateForm(false);
 
-      // Add to recent libraries
       await addRecentLibrary(libraryPath.trim(), lib.name, lib.clipCount);
-
-      // Update local settings state
       const updatedSettings = await getAppSettings();
       setSettings(updatedSettings);
     } catch (err) {
       setError(
-        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to create library'
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to create project'
       );
     } finally {
       setIsLoading(false);
@@ -250,10 +325,32 @@ function App() {
     );
   }
 
+  // Dev Menu overlay (renders above everything when active)
+  if (showDevMenu && settings) {
+    return (
+      <DevMenu
+        settings={settings}
+        onSettingsChange={setSettings}
+        onClose={() => setShowDevMenu(false)}
+      />
+    );
+  }
+
+  // First-run wizard gate (before anything else after loading)
+  if (settings && !settings.firstRunCompleted) {
+    return (
+      <FirstRunWizard
+        settings={settings}
+        onComplete={handleWizardComplete}
+      />
+    );
+  }
+
   // Library is open: show library view with MainLayout
   if (library) {
     return (
       <ErrorBoundary>
+        {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
         <LibraryView
           library={library}
           onClose={handleCloseLibrary}
@@ -269,8 +366,9 @@ function App() {
   if (unmountedLibrary) {
     return (
       <div className="app-welcome">
+        {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
         <div className="welcome-container">
-          <h1 className="welcome-title">Library Not Available</h1>
+          <h1 className="welcome-title">Project Not Available</h1>
           <p className="welcome-subtitle">
             "{unmountedLibrary.name}" is on a drive that's not currently connected.
           </p>
@@ -294,7 +392,7 @@ function App() {
               }}
               disabled={isLoading}
             >
-              Open Different Library
+              Open Different Project
             </button>
           </div>
 
@@ -308,7 +406,7 @@ function App() {
                   }
                 }}
               />
-              Remove from recent libraries
+              Remove from recent projects
             </label>
           </div>
         </div>
@@ -316,24 +414,25 @@ function App() {
     );
   }
 
-  // Pro mode: show Library Dashboard or Settings
-  if (settings?.mode === 'pro') {
-    // Settings view (full page)
+  // Advanced mode: show Library Dashboard or Settings
+  if (settings?.mode === 'advanced') {
     if (showAppSettings) {
       return (
         <ErrorBoundary>
+          {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
           <SettingsView
             settings={settings}
             onSettingsChange={setSettings}
             onBack={() => setShowAppSettings(false)}
+            onOpenDevMenu={() => { setShowAppSettings(false); setShowDevMenu(true); }}
           />
         </ErrorBoundary>
       );
     }
 
-    // Library Dashboard
     return (
       <ErrorBoundary>
+        {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
         <LibraryDashboard
           settings={settings}
           onLibrarySelect={setLibrary}
@@ -344,9 +443,10 @@ function App() {
     );
   }
 
-  // Personal mode: Welcome/open screen
+  // Simple mode: Welcome/open screen
   return (
     <div className="app-welcome">
+      {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
       <div className="welcome-container">
         <h1 className="welcome-title">dad cam</h1>
         <p className="welcome-subtitle">video library for dad cam footage</p>
@@ -361,38 +461,38 @@ function App() {
                 onClick={handleOpenLibrary}
                 disabled={isLoading}
               >
-                {isLoading ? 'Opening...' : 'Open Library'}
+                {isLoading ? 'Opening...' : 'Open Project'}
               </button>
               <button
                 className="secondary-button"
                 onClick={() => setShowCreateForm(true)}
                 disabled={isLoading}
               >
-                Create New Library
+                Create New Project
               </button>
             </div>
 
-            {/* Recent libraries list */}
-            {settings && settings.recentLibraries.length > 0 && (
+            {/* Recent projects list */}
+            {settings && settings.recentProjects.length > 0 && (
               <div className="recent-libraries">
-                <h3 className="recent-title">Recent Libraries</h3>
+                <h3 className="recent-title">Recent Projects</h3>
                 <ul className="recent-list">
-                  {settings.recentLibraries.map((lib) => (
-                    <li key={lib.path} className="recent-item">
+                  {settings.recentProjects.map((proj) => (
+                    <li key={proj.path} className="recent-item">
                       <button
                         className="recent-button"
                         onClick={async () => {
                           setIsLoading(true);
                           setError(null);
                           try {
-                            const isValid = await validateLibraryPath(lib.path);
+                            const isValid = await validateLibraryPath(proj.path);
                             if (isValid) {
-                              const openedLib = await openLibrary(lib.path);
+                              const openedLib = await openLibrary(proj.path);
                               clearThumbnailCache();
                               setLibrary(openedLib);
-                              await addRecentLibrary(lib.path, openedLib.name, openedLib.clipCount);
+                              await addRecentLibrary(proj.path, openedLib.name, openedLib.clipCount);
                             } else {
-                              setUnmountedLibrary({ path: lib.path, name: lib.name });
+                              setUnmountedLibrary({ path: proj.path, name: proj.name });
                             }
                           } catch (err) {
                             setError(
@@ -400,7 +500,7 @@ function App() {
                                 ? err
                                 : err instanceof Error
                                 ? err.message
-                                : 'Failed to open library'
+                                : 'Failed to open project'
                             );
                           } finally {
                             setIsLoading(false);
@@ -408,9 +508,9 @@ function App() {
                         }}
                         disabled={isLoading}
                       >
-                        <span className="recent-name">{lib.name}</span>
+                        <span className="recent-name">{proj.name}</span>
                         <span className="recent-meta">
-                          {lib.clipCount} clips
+                          {proj.clipCount} clips
                         </span>
                       </button>
                     </li>
@@ -422,7 +522,7 @@ function App() {
         ) : (
           <div className="create-form">
             <div className="input-group">
-              <label htmlFor="new-library-path">Library Location</label>
+              <label htmlFor="new-library-path">Project Location</label>
               <div className="input-with-button">
                 <input
                   id="new-library-path"
@@ -445,11 +545,11 @@ function App() {
             </div>
 
             <div className="input-group">
-              <label htmlFor="library-name">Library Name</label>
+              <label htmlFor="library-name">Project Name</label>
               <input
                 id="library-name"
                 type="text"
-                placeholder="My Video Library"
+                placeholder="My Video Project"
                 value={newLibraryName}
                 onChange={(e) => setNewLibraryName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleCreateLibrary()}
@@ -463,7 +563,7 @@ function App() {
                 onClick={handleCreateLibrary}
                 disabled={isLoading}
               >
-                {isLoading ? 'Creating...' : 'Create Library'}
+                {isLoading ? 'Creating...' : 'Create Project'}
               </button>
               <button
                 className="secondary-button"
@@ -482,7 +582,7 @@ function App() {
         )}
 
         <div className="help-text">
-          <p>Select an existing Dad Cam library folder or create a new one.</p>
+          <p>Select an existing Dad Cam project folder or create a new one.</p>
           <p>
             Use the CLI to ingest footage: <code>dadcam ingest /path/to/source</code>
           </p>
@@ -495,7 +595,7 @@ function App() {
             onClick={() => setShowAppSettings(true)}
             style={{ background: 'none', border: 'none', cursor: 'pointer' }}
           >
-            Mode: {settings.mode === 'personal' ? 'Personal' : 'Pro'} (click to change)
+            Mode: {settings.mode === 'simple' ? 'Simple' : 'Advanced'} (click to change)
           </button>
         )}
       </div>
@@ -512,13 +612,14 @@ function App() {
         </svg>
       </button>
 
-      {/* Settings view (full page overlay for Personal mode welcome screen) */}
+      {/* Settings view (full page overlay for Simple mode welcome screen) */}
       {showAppSettings && settings && (
         <div className="settings-overlay">
           <SettingsView
             settings={settings}
             onSettingsChange={setSettings}
             onBack={() => setShowAppSettings(false)}
+            onOpenDevMenu={() => { setShowAppSettings(false); setShowDevMenu(true); }}
           />
         </div>
       )}

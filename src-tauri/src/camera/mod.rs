@@ -1,5 +1,9 @@
 // Camera profile matching module
 
+pub mod devices;
+pub mod matcher;
+pub mod bundled;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use crate::error::Result;
@@ -114,6 +118,22 @@ fn score_profile_match(
             if codecs.iter().any(|c| codec.to_lowercase() == c.to_lowercase()) {
                 matches += 1;
                 reasons.push(format!("Codec matches: {}", codec));
+            }
+        }
+    }
+
+    // Check container
+    if let Some(ref containers) = profile.match_rules.container {
+        total_rules += 1;
+        if let Some(ref container) = metadata.container {
+            // ffprobe format_name can be comma-separated (e.g., "mpegts,mov,mp4")
+            let container_parts: Vec<&str> = container.split(',').collect();
+            if containers.iter().any(|c| {
+                let c_lower = c.to_lowercase();
+                container_parts.iter().any(|p| p.trim().to_lowercase() == c_lower)
+            }) {
+                matches += 1;
+                reasons.push(format!("Container matches: {}", container));
             }
         }
     }

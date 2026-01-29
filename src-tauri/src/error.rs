@@ -69,6 +69,9 @@ pub enum DadCamError {
 
     #[error("Event not found: {0}")]
     EventNotFound(i64),
+
+    #[error("License error: {0}")]
+    License(String),
 }
 
 impl From<anyhow::Error> for DadCamError {

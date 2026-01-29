@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.62
+Version: 0.1.104
 
 ---
 
@@ -64,6 +64,7 @@ my-library/
     thumbs/            # Poster frame JPGs
     sprites/           # Hover scrub sprite sheets
     exports/           # Rendered output files
+    sidecars/          # Per-clip metadata JSON
   originals/           # Copied source files (when using copy mode)
 ```
 
@@ -654,6 +655,238 @@ Error Handling:
 - User messages: Technical errors mapped to friendly descriptions
 
 See docs/planning/phase-8.md for implementation details.
+
+---
+
+App Modes and Settings (Phase 9)
+
+Two user modes with persistent settings (v2 schema, Tauri Store).
+
+Modes:
+- Simple: Single project, auto-open last project, light theme only, no feature toggles
+- Advanced: Multi-project dashboard, full feature toggles, theme toggle, dev menu
+
+Settings v2 schema (Tauri Store JSON, not SQLite):
+- version: 2
+- mode: "simple" | "advanced"
+- firstRunCompleted: boolean
+- theme: "light" | "dark"
+- defaultProjectPath: string | null
+- recentProjects: array of { path, name, lastOpened, clipCount, thumbnailPath }
+- featureFlags: { screenGrabs, faceDetection, bestClips, camerasTab }
+- devMenu: { titleStartSeconds, jlBlendMs, scoreWeights, watermarkText }
+- licenseStateCache: { licenseType, isActive, daysRemaining } | null
+
+Migration v1 to v2 (automatic on first load):
+- "personal" -> "simple", "pro" -> "advanced"
+- lastLibraryPath -> defaultProjectPath
+- recentLibraries -> recentProjects
+- firstRunCompleted = true for existing users (skip wizard)
+- Old v1 keys deleted after migration
+
+Theme System:
+- Light mode: default for all users
+- Dark mode: available in Advanced mode only via Settings > General > Theme toggle
+- Applied via `document.documentElement.classList.toggle('dark-mode')`
+- CSS variables switch between light/dark palettes on :root vs :root.dark-mode
+- Simple mode users always get light theme (no toggle shown)
+
+Feature Flags (Advanced mode only):
+- screenGrabs: Export still frames (default: true)
+- faceDetection: Face detection during scoring (default: true in Advanced, false in Simple)
+- bestClips: Auto-identify top clips (default: true)
+- camerasTab: Show cameras section in sidebar (default: true in Advanced, false in Simple)
+
+First-Run Wizard:
+- Shown when firstRunCompleted is false
+- Step 1: Choose Simple or Advanced mode
+- Step 2 (Simple): Pick project folder, creates default project
+- Step 2 (Advanced): Navigates to projects dashboard
+- Sets firstRunCompleted = true on finish
+
+Tauri Commands:
+- get_app_settings: Load settings with v1->v2 migration
+- save_app_settings: Persist all settings
+- get_mode / set_mode: Mode getter/setter (set_mode also resets feature flags)
+- add_recent_library / remove_recent_library: Manage recent projects list
+- get_recent_libraries: List recent projects
+- validate_library_path: Check if .dadcam/dadcam.db exists at path
+
+---
+
+Theme CSS Variables
+
+Light mode (default, :root):
+```css
+--color-canvas: #FAFAF8;
+--color-surface: #FFFFFF;
+--color-surface-elevated: #FFFFFF;
+--color-text: rgba(10, 10, 11, 0.87);
+--color-text-secondary: rgba(10, 10, 11, 0.60);
+--color-text-muted: rgba(10, 10, 11, 0.38);
+--color-border: #E5E5E5;
+--color-border-emphasis: #D4D4D4;
+```
+
+Dark mode (:root.dark-mode):
+```css
+--color-canvas: #0a0a0b;
+--color-surface: #111113;
+--color-surface-elevated: #1A1A1C;
+--color-text: rgba(250, 250, 248, 0.87);
+--color-text-secondary: rgba(250, 250, 248, 0.60);
+--color-text-muted: rgba(250, 250, 248, 0.38);
+--color-border: #1f1f23;
+--color-border-emphasis: #3A3A3E;
+```
+
+---
+
+Dev Menu (Phase 9)
+
+Access: Cmd+Shift+D (Mac) / Ctrl+Shift+D (Win/Linux), or Settings > About > click version 7 times.
+
+Sections:
+1. Formulas: titleStartSeconds (default 5), jlBlendMs (default 500), score weights with sliders, watermark text override
+2. Camera Database: Full profile table + device table, import JSON (native file picker), export JSON (native save dialog)
+3. License Tools: View license state, inline key activation with validation feedback, generate rental keys (batch 1-100), clear license
+4. Debug: Live log viewer (job-progress events, last 200 lines), FFmpeg/ffprobe/exiftool version check, database stats, clear caches, export database (native save dialog), export EXIF dump (clip ID + save dialog), raw SQL (dev key only)
+
+Tauri Commands:
+- test_ffmpeg: Check tool versions
+- clear_caches: Remove proxies/thumbs/sprites
+- export_database: WAL checkpoint + copy DB
+- export_exif_dump: Per-clip EXIF JSON
+- execute_raw_sql: Gated to dev license only
+- generate_rental_keys: Batch key generation (1-100)
+- get_db_stats: Clip/asset/event/job counts + DB file size
+
+---
+
+Licensing System (Phase 9)
+
+Offline license validation. No phone home (contract 13).
+
+License Types:
+- trial: 14-day free trial, starts on first launch
+- purchased: DCAM-P- prefix, permanent
+- rental: DCAM-R- prefix, for camera rentals
+- dev: DCAM-D- prefix, full access
+
+Key Validation:
+- Algorithm: BLAKE3 keyed hash
+- Storage: System keychain (keyring crate)
+- Trial date: Also stored in keychain (survives settings deletion)
+
+Soft Lock After Trial Expiry:
+- CAN: view, browse, play clips; export originals (file copy); export rendered with watermark + 720p cap
+- CANNOT: import new footage; run scoring/face detection/best clips; register cameras to custom DB
+
+Feature Gating:
+- import: Blocked when trial expired
+- scoring: Blocked when trial expired
+- camera_registration: Blocked when trial expired
+- raw_sql: Dev license only
+
+Tauri Commands:
+- get_license_state: Current license info
+- activate_license: Validate and store key
+- deactivate_license: Remove key, revert to trial
+- is_feature_allowed: Check specific feature gate
+
+---
+
+VHS Export (Phase 9)
+
+Full video export pipeline with J & L audio blending and optional title overlay.
+
+Selection Modes: all, favorites, date_range, event, score_threshold
+Ordering: chronological, score_desc, score_asc, shuffle
+
+J & L Audio Blending:
+- J-cut: Audio from next clip starts before video transition
+- L-cut: Audio from current clip continues after video transition
+- Default blend duration: 500ms (configurable in dev menu)
+- FFmpeg: xfade (video crossfade) + acrossfade (audio crossfade)
+
+Opening Title:
+- Input: Plain text field in export dialog (optional)
+- Timing: Starts at titleStartSeconds (default 5, configurable in dev menu)
+- Duration: 3 seconds (fade in 0.5s, hold 2s, fade out 0.5s)
+- FFmpeg: drawtext filter, centered, semi-transparent background
+
+Watermark (trial exports):
+- Text: "Dad Cam Trial" centered bottom
+- Resolution cap: 1280x720 max
+
+Export History:
+- Stored in export_history table (Migration 4)
+- Fields: selection_mode, ordering, title_text, resolution, is_watermarked, status, duration_ms, file_size_bytes, clip_count
+
+Tauri Commands:
+- start_vhs_export: Run full pipeline (select, build, render)
+- get_export_history: List past exports
+- cancel_export: Cancel running export
+
+---
+
+Camera System (Phase 9)
+
+Camera detection and device registration for fleet management.
+
+Detection Priority:
+1. Custom device by USB fingerprint: 100% confidence
+2. Custom device by serial number: 95% confidence
+3. Custom device by make + model: 80% confidence
+4. Bundled profile by make + model: 80% confidence
+5. Bundled profile by filename pattern: 70% confidence
+6. Generic fallback: 0% confidence (silent, no prompts)
+
+Bundled Database:
+- File: resources/cameras/canonical.json
+- Loaded by bundled.rs on startup
+- Currently empty (system works with generic fallback)
+
+Device Registration:
+- USB fingerprint capture (macOS: system_profiler -xml, Windows: PowerShell Get-CimInstance, Linux: /sys/bus/usb/devices/)
+- All USB detection wrapped in std::panic::catch_unwind (best-effort, never blocks user)
+- Root hubs filtered out, fingerprints deduplicated
+- Device stored in camera_devices table (Migration 5)
+- Gated by licensing (camera_registration feature)
+
+Camera Profiles Table (Migration 1):
+- camera_profiles: id, name, version, match_rules (JSON), transform_rules (JSON)
+
+Camera Devices Table (Migration 5):
+- camera_devices: id, uuid, profile_id, serial_number, fleet_label, usb_fingerprints (JSON), rental_notes
+- clips.camera_device_id: Foreign key added to clips table
+
+Tauri Commands:
+- list_camera_profiles: All profiles
+- list_camera_devices: All registered devices
+- register_camera_device: Capture USB + save device
+- match_camera: Match a clip to a profile/device
+- import_camera_db / export_camera_db: JSON import/export
+
+---
+
+Import Dialog (Phase 9)
+
+GUI import flow with progress tracking and camera detection.
+
+Three Phases:
+1. Setup: Folder picker, event assignment (existing or new)
+2. Progress: Real-time progress via job-progress Tauri events
+3. Summary: Total processed/skipped/failed, camera breakdown (Advanced mode)
+
+Features:
+- Cancel support via cancel_job command
+- Event linking (existing or create new during import)
+- Camera auto-detection results displayed in Advanced mode
+
+Sidecar Files:
+- Written to .dadcam/sidecars/<clip_id>.json during ingest
+- Schema v0.2.0: MetadataSnapshot, CameraMatchSnapshot, IngestTimestamps, DerivedAssetPaths
 
 ---
 

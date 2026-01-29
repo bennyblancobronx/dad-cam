@@ -17,6 +17,7 @@ pub struct MediaMetadata {
     pub fps: Option<f64>,
     pub codec: Option<String>,
     pub bitrate: Option<i64>,
+    pub container: Option<String>,
 
     // Audio properties
     pub audio_codec: Option<String>,
@@ -30,6 +31,7 @@ pub struct MediaMetadata {
     // Camera info
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
+    pub serial_number: Option<String>,
 
     // Media type
     pub media_type: String,
@@ -58,6 +60,9 @@ pub fn extract_metadata(path: &Path) -> Result<MediaMetadata> {
         }
         if meta.camera_model.is_none() {
             meta.camera_model = exif.camera_model;
+        }
+        if meta.serial_number.is_none() {
+            meta.serial_number = exif.serial_number;
         }
     }
 

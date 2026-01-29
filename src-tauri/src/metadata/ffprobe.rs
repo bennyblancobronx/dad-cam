@@ -26,6 +26,7 @@ struct FFprobeStream {
 
 #[derive(Debug, Deserialize)]
 struct FFprobeFormat {
+    format_name: Option<String>,
     duration: Option<String>,
     bit_rate: Option<String>,
     tags: Option<FFprobeTags>,
@@ -93,6 +94,7 @@ pub fn probe(path: &Path) -> Result<MediaMetadata> {
             meta.duration_ms = parse_duration_ms(format.duration.as_deref());
         }
         meta.bitrate = format.bit_rate.as_ref().and_then(|s| s.parse().ok());
+        meta.container = format.format_name.clone();
 
         // Try to get creation time from format tags
         if let Some(ref tags) = format.tags {

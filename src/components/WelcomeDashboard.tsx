@@ -1,70 +1,41 @@
-// Dad Cam - Welcome Dashboard (Personal Mode)
-// Landing page when a library is open, provides quick access to main actions
+// Dad Cam - Welcome Dashboard (Simple Mode)
+// Landing page when a project is open, provides quick access to main actions
 
 import { useState, useCallback } from 'react';
-import { open } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
 import type { LibraryInfo } from '../types/clips';
+import type { FeatureFlags } from '../types/settings';
+import { ImportDialog } from './ImportDialog';
+import { BestClipsPanel } from './BestClipsPanel';
+import { isFeatureAllowed } from '../api/licensing';
 
 interface WelcomeDashboardProps {
   library: LibraryInfo;
   onNavigateToClips: () => void;
   onNavigateToStills: () => void;
+  /** Feature flags to gate optional sections */
+  featureFlags?: FeatureFlags;
 }
 
 export function WelcomeDashboard({
   library,
   onNavigateToClips,
   onNavigateToStills,
+  featureFlags,
 }: WelcomeDashboardProps) {
-  const [isImporting, setIsImporting] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
   const [importStatus, setImportStatus] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
 
-  // Handle import footage
-  const handleImport = useCallback(async () => {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Select Folder to Import',
-      });
-
-      if (!selected) return;
-
-      setIsImporting(true);
-      setImportStatus(null);
-
-      const result = await invoke<{
-        jobId: number;
-        totalFiles: number;
-        processed: number;
-        skipped: number;
-        failed: number;
-        clipsCreated: number[];
-      }>('start_ingest', {
-        sourcePath: selected,
-        libraryPath: library.rootPath,
-      });
-
-      setImportStatus({
-        type: 'success',
-        message: `Imported ${result.processed} clips${result.skipped > 0 ? ` (${result.skipped} skipped)` : ''}`,
-      });
-
-      // Clear status after 5 seconds
-      setTimeout(() => setImportStatus(null), 5000);
-    } catch (err) {
-      setImportStatus({
-        type: 'error',
-        message: typeof err === 'string' ? err : err instanceof Error ? err.message : 'Import failed',
-      });
-    } finally {
-      setIsImporting(false);
-    }
-  }, [library.rootPath]);
+  // Handle import complete callback
+  const handleImportComplete = useCallback(() => {
+    setImportStatus({
+      type: 'success',
+      message: 'Import complete',
+    });
+    setTimeout(() => setImportStatus(null), 5000);
+  }, []);
 
   // Handle stills - navigate to clip grid for frame selection
   const handleStills = useCallback(() => {
@@ -82,7 +53,7 @@ export function WelcomeDashboard({
       <div className="welcome-dashboard-content">
         <h1 className="welcome-dashboard-title">{library.name}</h1>
         <p className="welcome-dashboard-subtitle">
-          {library.clipCount} clips in library
+          {library.clipCount} clips in project
         </p>
 
         {/* Status message */}
@@ -98,17 +69,26 @@ export function WelcomeDashboard({
         <div className="welcome-button-grid">
           <button
             className="welcome-btn welcome-btn-primary"
-            onClick={handleImport}
-            disabled={isImporting}
+            onClick={async () => {
+              try {
+                const allowed = await isFeatureAllowed('import');
+                if (!allowed) {
+                  setImportStatus({ type: 'error', message: 'Trial expired. Please activate a license to import footage.' });
+                  return;
+                }
+              } catch {
+                // If check fails, let backend handle it
+              }
+              setShowImportDialog(true);
+            }}
             title="Import video files from a folder"
           >
-            {isImporting ? 'Importing...' : 'Import Footage'}
+            Import Footage
           </button>
 
           <button
             className="welcome-btn welcome-btn-secondary"
             onClick={handleStills}
-            disabled={isImporting}
             title="Browse clips to export still frames"
           >
             Stills
@@ -118,7 +98,6 @@ export function WelcomeDashboard({
           <button
             className="welcome-btn welcome-btn-secondary"
             onClick={handleExport}
-            disabled={isImporting}
             title="Select clips to export"
           >
             Export Footage
@@ -127,13 +106,25 @@ export function WelcomeDashboard({
           <button
             className="welcome-btn welcome-btn-ghost"
             onClick={onNavigateToClips}
-            disabled={isImporting}
-            title="View all clips in the library"
+            title="View all clips in the project"
           >
             Browse All Clips
           </button>
         </div>
+
+        {/* Best Clips section -- gated by featureFlags.bestClips */}
+        {featureFlags?.bestClips !== false && library.clipCount > 0 && (
+          <BestClipsPanel onClipClick={() => onNavigateToClips()} />
+        )}
       </div>
+
+      {showImportDialog && (
+        <ImportDialog
+          libraryPath={library.rootPath}
+          onClose={() => setShowImportDialog(false)}
+          onComplete={handleImportComplete}
+        />
+      )}
     </div>
   );
 }

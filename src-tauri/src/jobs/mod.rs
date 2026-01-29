@@ -1,6 +1,11 @@
 // Job system module
 
 pub mod runner;
+pub mod progress;
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -8,6 +13,42 @@ use chrono::Utc;
 use crate::db::schema::{self, Job, NewJob};
 use crate::constants::{JOB_LEASE_DURATION_SECONDS, JOB_MAX_RETRIES, JOB_BASE_BACKOFF_SECONDS};
 use crate::error::{DadCamError, Result};
+
+/// Global registry of cancel flags keyed by job_id string.
+/// When a cancel is requested, the corresponding AtomicBool is set to true.
+/// Job runners check this flag between phases.
+static CANCEL_FLAGS: std::sync::LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Register a cancel flag for a job. Returns the flag for the runner to check.
+pub fn register_cancel_flag(job_id: &str) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut flags = CANCEL_FLAGS.lock().unwrap();
+    flags.insert(job_id.to_string(), Arc::clone(&flag));
+    flag
+}
+
+/// Request cancellation of a job.
+pub fn request_cancel(job_id: &str) -> bool {
+    let flags = CANCEL_FLAGS.lock().unwrap();
+    if let Some(flag) = flags.get(job_id) {
+        flag.store(true, Ordering::Relaxed);
+        true
+    } else {
+        false
+    }
+}
+
+/// Remove a cancel flag after a job finishes.
+pub fn remove_cancel_flag(job_id: &str) {
+    let mut flags = CANCEL_FLAGS.lock().unwrap();
+    flags.remove(job_id);
+}
+
+/// Check if a job has been cancelled.
+pub fn is_cancelled(flag: &AtomicBool) -> bool {
+    flag.load(Ordering::Relaxed)
+}
 
 /// Claim a pending job with lease
 pub fn claim_job(conn: &Connection, job_type: Option<&str>) -> Result<Option<Job>> {

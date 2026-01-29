@@ -24,7 +24,13 @@ export function SettingsPanel({ settings, onSettingsChange, onClose }: SettingsP
 
     try {
       await setMode(newMode);
-      onSettingsChange({ ...settings, mode: newMode });
+      onSettingsChange({
+        ...settings,
+        mode: newMode,
+        featureFlags: newMode === 'simple'
+          ? { screenGrabs: true, faceDetection: false, bestClips: true, camerasTab: false }
+          : { screenGrabs: true, faceDetection: true, bestClips: true, camerasTab: true },
+      });
     } catch (err) {
       setError(
         typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save settings'
@@ -56,36 +62,36 @@ export function SettingsPanel({ settings, onSettingsChange, onClose }: SettingsP
             </p>
 
             <div className="mode-options">
-              <label className={`mode-option ${settings.mode === 'personal' ? 'is-selected' : ''}`}>
+              <label className={`mode-option ${settings.mode === 'simple' ? 'is-selected' : ''}`}>
                 <input
                   type="radio"
                   name="mode"
-                  value="personal"
-                  checked={settings.mode === 'personal'}
-                  onChange={() => handleModeChange('personal')}
+                  value="simple"
+                  checked={settings.mode === 'simple'}
+                  onChange={() => handleModeChange('simple')}
                   disabled={isSaving}
                 />
                 <div className="mode-option-content">
-                  <span className="mode-option-title">Personal</span>
+                  <span className="mode-option-title">Simple</span>
                   <span className="mode-option-description">
-                    Single library, auto-opens on launch. Best for home use.
+                    One project, automatic camera matching, no setup needed.
                   </span>
                 </div>
               </label>
 
-              <label className={`mode-option ${settings.mode === 'pro' ? 'is-selected' : ''}`}>
+              <label className={`mode-option ${settings.mode === 'advanced' ? 'is-selected' : ''}`}>
                 <input
                   type="radio"
                   name="mode"
-                  value="pro"
-                  checked={settings.mode === 'pro'}
-                  onChange={() => handleModeChange('pro')}
+                  value="advanced"
+                  checked={settings.mode === 'advanced'}
+                  onChange={() => handleModeChange('advanced')}
                   disabled={isSaving}
                 />
                 <div className="mode-option-content">
-                  <span className="mode-option-title">Pro</span>
+                  <span className="mode-option-title">Advanced</span>
                   <span className="mode-option-description">
-                    Multi-library management with library dashboard. For professionals.
+                    Multiple projects, camera registration, feature toggles.
                   </span>
                 </div>
               </label>

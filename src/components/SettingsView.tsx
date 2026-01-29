@@ -1,23 +1,89 @@
 // Dad Cam - Settings View (Full Page)
 // Braun Design Language v1.0.0 - Settings nav (200px) + Form content (640px max)
 
-import { useState } from 'react';
-import type { AppSettings, AppMode } from '../types/settings';
-import { setMode } from '../api/settings';
+import { useState, useRef } from 'react';
+import type { AppSettings, AppMode, FeatureFlags } from '../types/settings';
+import { setMode, saveAppSettings, getAppSettings } from '../api/settings';
 import { APP_VERSION } from '../constants';
 
 interface SettingsViewProps {
   settings: AppSettings;
   onSettingsChange: (settings: AppSettings) => void;
   onBack: () => void;
+  onOpenDevMenu?: () => void;
 }
 
-type SettingsSection = 'general' | 'about';
+type SettingsSection = 'general' | 'features' | 'about';
 
-export function SettingsView({ settings, onSettingsChange, onBack }: SettingsViewProps) {
+export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Easter egg: click version 7 times to open dev menu
+  const versionClickCount = useRef(0);
+  const versionClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleVersionClick = () => {
+    versionClickCount.current += 1;
+
+    if (versionClickTimer.current) {
+      clearTimeout(versionClickTimer.current);
+    }
+
+    if (versionClickCount.current >= 7) {
+      versionClickCount.current = 0;
+      onOpenDevMenu?.();
+      return;
+    }
+
+    // Reset count after 2 seconds of inactivity
+    versionClickTimer.current = setTimeout(() => {
+      versionClickCount.current = 0;
+    }, 2000);
+  };
+
+  const handleThemeChange = async (theme: 'light' | 'dark') => {
+    if (theme === settings.theme) return;
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const updatedSettings: AppSettings = { ...settings, theme };
+      await saveAppSettings(updatedSettings);
+      onSettingsChange(updatedSettings);
+    } catch (err) {
+      setError(
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save settings'
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleFeatureFlagChange = async (flag: keyof FeatureFlags, value: boolean) => {
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      const updatedSettings: AppSettings = {
+        ...settings,
+        featureFlags: {
+          ...settings.featureFlags,
+          [flag]: value,
+        },
+      };
+      await saveAppSettings(updatedSettings);
+      onSettingsChange(updatedSettings);
+    } catch (err) {
+      setError(
+        typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save settings'
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleModeChange = async (newMode: AppMode) => {
     if (newMode === settings.mode) return;
@@ -27,7 +93,13 @@ export function SettingsView({ settings, onSettingsChange, onBack }: SettingsVie
 
     try {
       await setMode(newMode);
-      onSettingsChange({ ...settings, mode: newMode });
+      // Re-fetch settings from backend to stay in sync (set_mode saves mode + flags)
+      const updatedSettings = await getAppSettings();
+      // If switching to Simple while on the features tab, go back to general
+      if (newMode === 'simple' && activeSection === 'features') {
+        setActiveSection('general');
+      }
+      onSettingsChange(updatedSettings);
     } catch (err) {
       setError(
         typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save settings'
@@ -63,6 +135,17 @@ export function SettingsView({ settings, onSettingsChange, onBack }: SettingsVie
             </svg>
             General
           </button>
+          {settings.mode === 'advanced' && (
+            <button
+              className={`settings-nav-item ${activeSection === 'features' ? 'is-active' : ''}`}
+              onClick={() => setActiveSection('features')}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 6h12M4 10h8M4 14h10" />
+              </svg>
+              Features
+            </button>
+          )}
           <button
             className={`settings-nav-item ${activeSection === 'about' ? 'is-active' : ''}`}
             onClick={() => setActiveSection('about')}
@@ -87,38 +170,149 @@ export function SettingsView({ settings, onSettingsChange, onBack }: SettingsVie
               </p>
 
               <div className="mode-options">
-                <label className={`mode-option ${settings.mode === 'personal' ? 'is-selected' : ''}`}>
+                <label className={`mode-option ${settings.mode === 'simple' ? 'is-selected' : ''}`}>
                   <input
                     type="radio"
                     name="mode"
-                    value="personal"
-                    checked={settings.mode === 'personal'}
-                    onChange={() => handleModeChange('personal')}
+                    value="simple"
+                    checked={settings.mode === 'simple'}
+                    onChange={() => handleModeChange('simple')}
                     disabled={isSaving}
                   />
                   <div className="mode-option-content">
-                    <span className="mode-option-title">Personal</span>
+                    <span className="mode-option-title">Simple</span>
                     <span className="mode-option-description">
-                      Single library, auto-opens on launch. Best for home use.
+                      One project, automatic camera matching, no setup needed.
                     </span>
                   </div>
                 </label>
 
-                <label className={`mode-option ${settings.mode === 'pro' ? 'is-selected' : ''}`}>
+                <label className={`mode-option ${settings.mode === 'advanced' ? 'is-selected' : ''}`}>
                   <input
                     type="radio"
                     name="mode"
-                    value="pro"
-                    checked={settings.mode === 'pro'}
-                    onChange={() => handleModeChange('pro')}
+                    value="advanced"
+                    checked={settings.mode === 'advanced'}
+                    onChange={() => handleModeChange('advanced')}
                     disabled={isSaving}
                   />
                   <div className="mode-option-content">
-                    <span className="mode-option-title">Pro</span>
+                    <span className="mode-option-title">Advanced</span>
                     <span className="mode-option-description">
-                      Multi-library management with library dashboard. For professionals.
+                      Multiple projects, camera registration, feature toggles.
                     </span>
                   </div>
+                </label>
+              </div>
+
+              {/* Theme toggle -- Advanced mode only */}
+              {settings.mode === 'advanced' && (
+                <>
+                  <h2 className="settings-section-title" style={{ marginTop: 'var(--space-lg)' }}>Theme</h2>
+                  <p className="settings-section-description">
+                    Choose your preferred color scheme
+                  </p>
+                  <div className="mode-options">
+                    <label className={`mode-option ${settings.theme === 'light' ? 'is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="theme"
+                        value="light"
+                        checked={settings.theme === 'light'}
+                        onChange={() => handleThemeChange('light')}
+                        disabled={isSaving}
+                      />
+                      <div className="mode-option-content">
+                        <span className="mode-option-title">Light</span>
+                        <span className="mode-option-description">Default light interface</span>
+                      </div>
+                    </label>
+                    <label className={`mode-option ${settings.theme === 'dark' ? 'is-selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="theme"
+                        value="dark"
+                        checked={settings.theme === 'dark'}
+                        onChange={() => handleThemeChange('dark')}
+                        disabled={isSaving}
+                      />
+                      <div className="mode-option-content">
+                        <span className="mode-option-title">Dark</span>
+                        <span className="mode-option-description">Reduced brightness interface</span>
+                      </div>
+                    </label>
+                  </div>
+                </>
+              )}
+
+              {isSaving && (
+                <p className="settings-saving-indicator">Saving...</p>
+              )}
+            </div>
+          )}
+
+          {activeSection === 'features' && settings.mode === 'advanced' && (
+            <div className="settings-section">
+              <h2 className="settings-section-title">Feature Toggles</h2>
+              <p className="settings-section-description">
+                Enable or disable features. Changes take effect immediately.
+              </p>
+
+              <div className="feature-toggles">
+                <label className="feature-toggle-row">
+                  <div className="feature-toggle-info">
+                    <span className="feature-toggle-label">Screen Grabs</span>
+                    <span className="feature-toggle-description">Export still frames from video clips</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="feature-toggle-switch"
+                    checked={settings.featureFlags.screenGrabs}
+                    onChange={(e) => handleFeatureFlagChange('screenGrabs', e.target.checked)}
+                    disabled={isSaving}
+                  />
+                </label>
+
+                <label className="feature-toggle-row">
+                  <div className="feature-toggle-info">
+                    <span className="feature-toggle-label">Face Detection</span>
+                    <span className="feature-toggle-description">Detect faces during scoring analysis</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="feature-toggle-switch"
+                    checked={settings.featureFlags.faceDetection}
+                    onChange={(e) => handleFeatureFlagChange('faceDetection', e.target.checked)}
+                    disabled={isSaving}
+                  />
+                </label>
+
+                <label className="feature-toggle-row">
+                  <div className="feature-toggle-info">
+                    <span className="feature-toggle-label">Best Clips</span>
+                    <span className="feature-toggle-description">Automatically identify top clips by score</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="feature-toggle-switch"
+                    checked={settings.featureFlags.bestClips}
+                    onChange={(e) => handleFeatureFlagChange('bestClips', e.target.checked)}
+                    disabled={isSaving}
+                  />
+                </label>
+
+                <label className="feature-toggle-row">
+                  <div className="feature-toggle-info">
+                    <span className="feature-toggle-label">Cameras Tab</span>
+                    <span className="feature-toggle-description">Show camera profiles and devices in the sidebar</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="feature-toggle-switch"
+                    checked={settings.featureFlags.camerasTab}
+                    onChange={(e) => handleFeatureFlagChange('camerasTab', e.target.checked)}
+                    disabled={isSaving}
+                  />
                 </label>
               </div>
 
@@ -132,7 +326,13 @@ export function SettingsView({ settings, onSettingsChange, onBack }: SettingsVie
             <div className="settings-section">
               <h2 className="settings-section-title">About Dad Cam</h2>
               <div className="settings-about-content">
-                <p className="settings-version">Version {APP_VERSION}</p>
+                <p
+                  className="settings-version"
+                  onClick={handleVersionClick}
+                  style={{ cursor: 'default', userSelect: 'none' }}
+                >
+                  Version {APP_VERSION}
+                </p>
                 <p className="settings-tagline">Video library for dad cam footage</p>
                 <div className="settings-about-details">
                   <p>A modern video library for importing, organizing, viewing, and auto-editing footage from old-school digital cameras.</p>

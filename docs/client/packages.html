@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nightfox Films - Packages</title>
+    <style>
+        @page { size: letter; margin: 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 8.5in; height: 11in; overflow: hidden; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: #ebe4db;
+            color: #071d25;
+            line-height: 1.35;
+            padding: 0.45in 0.55in 0.35in;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* --- Header --- */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding-bottom: 0.1in;
+            border-bottom: 2px solid #eba185;
+            margin-bottom: 0.06in;
+        }
+        h1 { font-size: 24px; font-weight: 500; letter-spacing: -0.5px; color: #eba185; }
+        .url { font-size: 10px; color: #071d25; opacity: 0.4; letter-spacing: 0.5px; }
+        .tagline {
+            font-size: 9px; text-transform: uppercase; letter-spacing: 2.5px;
+            color: #071d25; opacity: 0.35; margin-bottom: 0.12in;
+        }
+
+        /* --- Top Row --- */
+        .top-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.14in;
+            margin-bottom: 0.14in;
+        }
+
+        /* --- Package Card --- */
+        .card {
+            border: 1px solid rgba(7,29,37,0.12);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.35);
+            padding: 0.12in;
+        }
+        .card-head {
+            padding-bottom: 0.05in;
+            margin-bottom: 0.05in;
+            border-bottom: 1px solid rgba(7,29,37,0.08);
+        }
+        .card-title { font-size: 14px; font-weight: 600; }
+        .card-price { font-size: 11px; color: #eba185; font-weight: 500; margin-top: 1px; }
+
+        /* --- Choose One Note --- */
+        .choose-note {
+            font-size: 8px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 1.5px; color: #071d25; opacity: 0.35;
+            margin-bottom: 0.04in;
+        }
+
+        /* --- Medium Option --- */
+        .medium {
+            border: 1px solid rgba(7,29,37,0.06);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.3);
+            padding: 0.04in 0.07in;
+            margin-bottom: 0.04in;
+        }
+        .medium:last-child { margin-bottom: 0; }
+
+        /* --- Section Labels (small, column headers) --- */
+        .label {
+            font-size: 8.5px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 1.2px; color: #eba185;
+            margin-bottom: 1px;
+        }
+
+        /* --- Section Header (larger, group titles) --- */
+        .section-title {
+            font-size: 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 1.5px; color: #071d25; opacity: 0.45;
+            padding-bottom: 0.03in;
+            margin-bottom: 0.06in;
+            border-bottom: 1px solid rgba(7,29,37,0.08);
+        }
+
+        /* --- List Items --- */
+        ul { list-style: none; padding: 0; margin: 0; }
+        li {
+            font-size: 9.5px; color: #071d25; opacity: 0.7;
+            padding: 1.5px 0 1.5px 8px; position: relative;
+        }
+        li::before {
+            content: ''; position: absolute; left: 0; top: 6px;
+            width: 3px; height: 3px; background: #eba185; border-radius: 50%;
+        }
+
+        /* --- Full Width Card (Dream Team) --- */
+        .card-full {
+            border: 2px solid #eba185;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.35);
+            padding: 0.18in 0.2in;
+        }
+        .card-full .card-head { margin-bottom: 0.06in; }
+        .card-full .card-title { font-size: 16px; }
+
+        /* --- Dream Team: Medium Picker 2x2 --- */
+        .medium-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.06in;
+            margin-bottom: 0.1in;
+        }
+        .medium-chip {
+            border: 1px solid rgba(7,29,37,0.10);
+            border-radius: 6px;
+            background: rgba(255,255,255,0.4);
+            padding: 0.045in 0.08in;
+            font-size: 10px;
+            font-weight: 600;
+            color: #071d25;
+            opacity: 0.6;
+            text-align: center;
+        }
+
+        /* --- Dream Team: Experiences 3-col --- */
+        .three-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 0.14in;
+            margin-bottom: 0.1in;
+        }
+
+        /* --- Dream Team: Always Included --- */
+        .included {
+            border-top: 1px solid rgba(7,29,37,0.08);
+            padding-top: 0.05in;
+        }
+        .included ul {
+            columns: 2;
+            column-gap: 0.18in;
+        }
+
+        /* --- Footer --- */
+        footer {
+            padding-top: 0.1in;
+            font-size: 8.5px; color: #071d25; opacity: 0.3;
+            text-align: center; letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>Nightfox Films</h1>
+    <span class="url">nightfoxfilms.com</span>
+</header>
+<div class="tagline">Super 8 - Camcorder - 4K Digital</div>
+
+<!-- Top Row: Two smaller packages -->
+<div class="top-row">
+
+    <div class="card">
+        <div class="card-head">
+            <div class="card-title">Nostalgically Correct</div>
+            <div class="card-price">Starting at $2,400</div>
+        </div>
+        <div class="choose-note">Choose One</div>
+        <div class="medium">
+            <div class="label">Super 8</div>
+            <ul>
+                <li>1 Roll of Super 8</li>
+                <li>The Perfect Mini Highlight Film</li>
+            </ul>
+        </div>
+        <div class="medium">
+            <div class="label">Dad Cam</div>
+            <ul>
+                <li>The Most Low Key</li>
+                <li>1+ Hour VHS Style Video</li>
+                <li>Full Ceremony & Speeches Included</li>
+            </ul>
+        </div>
+        <div class="medium">
+            <div class="label">Modern Digital</div>
+            <ul>
+                <li>Best Quality Audio & Video</li>
+                <li>All of The Clips</li>
+                <li>Drone Footage</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div class="card-title">The Classics</div>
+            <div class="card-price">Starting at $3,200</div>
+        </div>
+        <div class="choose-note">Choose One</div>
+        <div class="medium">
+            <div class="label">Super 8</div>
+            <ul>
+                <li>1 Roll Indoor / 1 Roll Outdoor Super 8 Film</li>
+                <li>Full Ceremony & Speeches on Dad Cam</li>
+            </ul>
+        </div>
+        <div class="medium">
+            <div class="label">Dad Cam</div>
+            <ul>
+                <li>Wedding Week Dad Cam</li>
+                <li>2+ Hour VHS Style Video</li>
+                <li>Uncut First Look, Ceremony, First Dances, Speeches, Cake Cutting, Etc</li>
+            </ul>
+        </div>
+        <div class="medium">
+            <div class="label">Modern 4K - High Quality</div>
+            <ul>
+                <li>Highlight Film</li>
+                <li>All of The Clips</li>
+                <li>Drone Footage</li>
+            </ul>
+        </div>
+    </div>
+
+</div>
+
+<div class="card-full">
+    <div class="card-head">
+        <div class="card-title">Mixed Media Dream Team</div>
+        <div class="card-price">Starting at $6,400</div>
+    </div>
+
+    <div class="choose-note">The Right Moments on The Right Mediums - Choose Up to 4</div>
+
+    <div class="medium-grid">
+        <div class="medium-chip">Super 8</div>
+        <div class="medium-chip">Modern Digital</div>
+        <div class="medium-chip">Dad Cam</div>
+        <div class="medium-chip">Bring Your Own Footage</div>
+    </div>
+
+    <div class="section-title">Experiences We Recommend</div>
+
+    <div class="three-col">
+        <div>
+            <div class="label">Raw Footage</div>
+            <ul>
+                <li>4+ Minute Super 8 Highlight Film</li>
+                <li>1 Roll Indoor/1 Roll Outdoor Film</li>
+                <li>Modern 4K Ceremony & Speeches</li>
+                <li>Dad Cam In-Between</li>
+            </ul>
+        </div>
+        <div>
+            <div class="label">Dad Cam Mixed Media</div>
+            <ul>
+                <li>6+ Minute Highlight Film</li>
+                <li>Wedding Week Dad Cam</li>
+                <li>Wedding Party Dad Cam</li>
+                <li>Modern 4K Core Moments</li>
+            </ul>
+        </div>
+        <div>
+            <div class="label">Super 8 Mixed Media</div>
+            <ul>
+                <li>8+ Minute Highlight Film</li>
+                <li>Super 8 Date Night</li>
+                <li>Modern 4K Core Moments</li>
+                <li>Dad Cam In-Between</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="included">
+        <div class="label">What's Included</div>
+        <ul>
+            <li>Videography Dream Team</li>
+            <li>All Day Coverage</li>
+            <li>No Travel Fees Anywhere in Upstate, NY (sorry NYC)</li>
+            <li>Date Night</li>
+            <li>Rehearsal Dinner</li>
+            <li>Raw Footage</li>
+        </ul>
+    </div>
+</div>
+
+<footer>Nightfox Films - by Jess and Bryant - Rochester, NY</footer>
+
+</body>
+</html>

@@ -26,6 +26,7 @@ pub const PROXIES_FOLDER: &str = "proxies";
 pub const THUMBS_FOLDER: &str = "thumbs";
 pub const SPRITES_FOLDER: &str = "sprites";
 pub const EXPORTS_FOLDER: &str = "exports";
+pub const SIDECARS_FOLDER: &str = "sidecars";
 
 // Time
 pub const EVENT_TIME_GAP_HOURS: i64 = 4;
@@ -48,6 +49,7 @@ pub const SPRITE_PAGE_COLS: u32 = 60;        // Frames per sprite sheet page
 
 // Camera profiles
 pub const CAMERA_PROFILE_FORMAT: &str = "json";
+pub const CAMERA_MATCH_MIN_CONFIDENCE: f64 = 0.5;
 
 // Storage semantics
 pub const RECORDED_AT_STORAGE: &str = "utc";

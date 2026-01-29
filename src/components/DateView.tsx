@@ -82,7 +82,7 @@ export function DateView({
     return (
       <div className="date-view">
         <div className="date-view-header">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>
@@ -100,7 +100,7 @@ export function DateView({
     return (
       <div className="date-view">
         <div className="date-view-header">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>
@@ -128,7 +128,7 @@ export function DateView({
     <div className="date-view">
       <div className="date-view-header">
         <div className="date-view-header-left">
-          <button className="back-button" onClick={onBack} title="Back to library">
+          <button className="back-button" onClick={onBack} title="Back to project">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M15 10H5M5 10l5 5M5 10l5-5" />
             </svg>

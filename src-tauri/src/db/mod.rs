@@ -47,6 +47,7 @@ pub fn init_library_folders(library_root: &Path) -> Result<()> {
     std::fs::create_dir_all(dadcam.join(THUMBS_FOLDER))?;
     std::fs::create_dir_all(dadcam.join(SPRITES_FOLDER))?;
     std::fs::create_dir_all(dadcam.join(EXPORTS_FOLDER))?;
+    std::fs::create_dir_all(dadcam.join(SIDECARS_FOLDER))?;
     std::fs::create_dir_all(library_root.join(ORIGINALS_FOLDER))?;
 
     Ok(())

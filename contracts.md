@@ -16,6 +16,7 @@ Version: 1.0
   - `.dadcam/thumbs/` (poster frames)
   - `.dadcam/sprites/` (hover scrub sheets)
   - `.dadcam/exports/` (rendered outputs)
+  - `.dadcam/sidecars/` (per-clip metadata JSON)
 - Originals stored in `originals/` at library root (when copied)
 
 ---
