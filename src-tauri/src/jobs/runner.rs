@@ -447,7 +447,7 @@ fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
         .ok_or_else(|| DadCamError::Other("Score job has no clip_id".to_string()))?;
     let job_id_str = job.id.to_string();
 
-    let clip = schema::get_clip(conn, clip_id)?
+    let _clip = schema::get_clip(conn, clip_id)?
         .ok_or_else(|| DadCamError::ClipNotFound(clip_id))?;
 
     // Check if already scored and up to date

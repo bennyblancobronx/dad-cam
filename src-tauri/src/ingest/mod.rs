@@ -20,7 +20,7 @@ use crate::db::schema::{
     update_clip_camera_refs,
 };
 use crate::hash::{compute_fast_hash, compute_size_duration_fingerprint};
-use crate::metadata::{extract_metadata, detect_media_type, parse_folder_date};
+use crate::metadata::{extract_metadata, parse_folder_date};
 use crate::constants::{HASH_FAST_SCHEME, ORIGINALS_FOLDER};
 use crate::error::{DadCamError, Result};
 

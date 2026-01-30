@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use crate::error::{DadCamError, Result};
 use crate::metadata::MediaMetadata;
 

@@ -116,7 +116,7 @@ pub fn get_clip_score(state: State<DbState>, clip_id: i64) -> Result<Option<Clip
 
 /// Score a specific clip
 #[tauri::command]
-pub fn score_clip(state: State<DbState>, library_path: String, clip_id: i64, force: bool) -> Result<ClipScoreResponse, String> {
+pub fn score_clip(_state: State<DbState>, library_path: String, clip_id: i64, force: bool) -> Result<ClipScoreResponse, String> {
     let library_root = PathBuf::from(&library_path);
     let db_path = get_db_path(&library_root);
     let conn = open_db(&db_path).map_err(|e| e.to_string())?;

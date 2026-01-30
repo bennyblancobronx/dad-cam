@@ -9,9 +9,11 @@ use super::ExportClip;
 use super::watermark;
 
 /// Default crossfade/blend duration in seconds (500ms per guide)
+#[allow(dead_code)]
 const DEFAULT_BLEND_SEC: f64 = 0.5;
 
 /// Default title start offset in seconds
+#[allow(dead_code)]
 const DEFAULT_TITLE_START_SEC: f64 = 5.0;
 
 /// Title overlay duration: 0.5s fade in + 2s hold + 0.5s fade out = 3s

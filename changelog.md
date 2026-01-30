@@ -4,6 +4,12 @@ This is the source of truth for version number.
 
 ---
 
+0.1.124 -- Version sync + compiler warning cleanup
+
+- Synced version to 0.1.123 across all 4 version files (tauri.conf.json was 0.1.116, constants.ts was 0.1.105, Cargo.toml and package.json were 0.1.0)
+- Fixed 12 compiler warnings: 5 unused Result values in export/mod.rs, 2 unused constants in ffmpeg_builder.rs, unused imports in ffprobe.rs/ingest/mod.rs/export/mod.rs, unused variables in scoring.rs/runner.rs
+- Zero warnings, zero errors on build
+
 0.1.123 -- Library Fix spec complete, docs sync
 
 - libraryfix.md (docs/planning/libraryfix.md) fully written: App DB + Portable Library DB long-term spec

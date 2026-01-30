@@ -6,7 +6,7 @@ pub mod ffmpeg_builder;
 pub mod watermark;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -172,14 +172,14 @@ pub fn run_vhs_export(
 
     let clips = timeline::select_clips(conn, library_id, params)?;
     if clips.is_empty() {
-        update_export_status(conn, export_id, "failed", None, None, None, None, Some("No clips matched selection criteria"));
+        let _ = update_export_status(conn, export_id, "failed", None, None, None, None, Some("No clips matched selection criteria"));
         return Err(DadCamError::Other("No clips matched selection criteria".to_string()));
     }
 
     let clip_count = clips.len() as i64;
 
     if crate::jobs::is_cancelled(cancel_flag) {
-        update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
+        let _ = update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
         return Ok(());
     }
 
@@ -204,7 +204,7 @@ pub fn run_vhs_export(
     )?;
 
     if crate::jobs::is_cancelled(cancel_flag) {
-        update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
+        let _ = update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
         return Ok(());
     }
 
@@ -235,7 +235,7 @@ pub fn run_vhs_export(
                 let _ = child.kill();
                 let _ = child.wait();
                 let _ = std::fs::remove_file(&tmp_path);
-                update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
+                let _ = update_export_status(conn, export_id, "cancelled", None, None, Some(clip_count), None, None);
                 emit_progress(app, &JobProgress::new(job_id, "render", 0, 100).cancelled());
                 return Ok(());
             }
@@ -259,7 +259,7 @@ pub fn run_vhs_export(
     if !status.success() {
         let _ = std::fs::remove_file(&tmp_path);
         let msg = format!("FFmpeg exited with code {}", status.code().unwrap_or(-1));
-        update_export_status(conn, export_id, "failed", None, None, Some(clip_count), None, Some(&msg));
+        let _ = update_export_status(conn, export_id, "failed", None, None, Some(clip_count), None, Some(&msg));
         return Err(DadCamError::FFmpeg(msg));
     }
 
