@@ -142,22 +142,223 @@ fn cancel_job(job_id: String) -> Result<bool, String> {
 
 #[tauri::command]
 fn get_jobs(state: State<DbState>, status: Option<String>, limit: i64) -> Result<Vec<Job>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let jobs = schema::list_jobs(conn, None, status.as_deref(), limit)
+    let jobs = schema::list_jobs(&conn, None, status.as_deref(), limit)
         .map_err(|e| e.to_string())?;
 
     Ok(jobs)
 }
 
+/// Sync bundled camera profiles from resources/cameras/bundled_profiles.json into App DB.
+/// Best-effort: failures are logged but never block startup.
+fn sync_bundled_profiles_at_startup() {
+    let conn = match db::app_db::open_app_db_connection() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Warning: Cannot sync bundled profiles (App DB unavailable): {}", e);
+            return;
+        }
+    };
+
+    // Try known locations for bundled_profiles.json
+    let candidates = [
+        std::path::PathBuf::from("resources/cameras/bundled_profiles.json"),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("../Resources/resources/cameras/bundled_profiles.json")))
+            .unwrap_or_default(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("resources/cameras/bundled_profiles.json")))
+            .unwrap_or_default(),
+    ];
+
+    for path in &candidates {
+        if path.exists() {
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Warning: Failed to read bundled_profiles.json: {}", e);
+                    return;
+                }
+            };
+
+            let entries: Vec<db::app_schema::BundledProfileJsonEntry> = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse bundled_profiles.json: {}", e);
+                    return;
+                }
+            };
+
+            match db::app_schema::sync_bundled_profiles(&conn, &entries) {
+                Ok(count) => {
+                    if count > 0 {
+                        eprintln!("Synced {} bundled camera profiles to App DB", count);
+                    }
+                }
+                Err(e) => eprintln!("Warning: Failed to sync bundled profiles: {}", e),
+            }
+            return;
+        }
+    }
+}
+
+/// One-time migration: copy Tauri Store (settings.json) into App DB (Spec 6.3).
+/// Runs inside .setup() so the store plugin is available.
+/// Best-effort: failures logged, never block startup.
+fn migrate_tauri_store_to_app_db(app: &mut tauri::App) {
+    use tauri_plugin_store::StoreExt;
+
+    let app_conn = match db::app_db::open_app_db_connection() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Skip if already migrated
+    if let Ok(Some(val)) = db::app_schema::get_setting(&app_conn, "tauri_store_migrated") {
+        if val == "true" {
+            return;
+        }
+    }
+
+    // Open Tauri Store
+    let store = match app.store("settings.json") {
+        Ok(s) => s,
+        Err(_) => {
+            // No store file = nothing to migrate. Mark done.
+            let _ = db::app_schema::set_setting(&app_conn, "tauri_store_migrated", "true");
+            return;
+        }
+    };
+
+    // Check if store has any data (version=0 means empty/nonexistent)
+    let version = store.get("version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if version == 0 {
+        let _ = db::app_schema::set_setting(&app_conn, "tauri_store_migrated", "true");
+        return;
+    }
+
+    // ui_mode
+    let mode_str = store.get("mode")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "simple".to_string());
+    let _ = db::app_schema::set_ui_mode(&app_conn, &mode_str);
+
+    // features (JSON)
+    if let Some(ff) = store.get("featureFlags") {
+        let _ = db::app_schema::set_features(&app_conn, &ff.to_string());
+    }
+
+    // title_card_offset_seconds from devMenu.titleStartSeconds
+    if let Some(dm) = store.get("devMenu") {
+        if let Some(tss) = dm.get("titleStartSeconds").and_then(|v| v.as_f64()) {
+            let _ = db::app_schema::set_title_offset(&app_conn, tss);
+        }
+        // Also persist full devMenu blob
+        let _ = db::app_schema::set_setting(&app_conn, "dev_menu", &dm.to_string());
+    }
+
+    // simple_default_library_uuid: resolve from defaultProjectPath
+    if let Some(default_path) = store.get("defaultProjectPath")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    {
+        if !default_path.is_empty() {
+            let lib_db_path = std::path::Path::new(&default_path)
+                .join(constants::DADCAM_FOLDER)
+                .join(constants::DB_FILENAME);
+            if lib_db_path.exists() {
+                if let Ok(lib_conn) = db::open_db(&lib_db_path) {
+                    if let Ok(uuid) = db::app_schema::get_or_create_library_uuid(&lib_conn) {
+                        let _ = db::app_schema::set_simple_default_library_uuid(&app_conn, &uuid);
+                    }
+                }
+            }
+        }
+    }
+
+    // recentProjects -> library registry
+    if let Some(rp) = store.get("recentProjects") {
+        if let Ok(projects) = serde_json::from_value::<Vec<serde_json::Value>>(rp.clone()) {
+            for project in &projects {
+                if let Some(path) = project.get("path").and_then(|v| v.as_str()) {
+                    let label = project.get("name").and_then(|v| v.as_str());
+                    let lib_db_path = std::path::Path::new(path)
+                        .join(constants::DADCAM_FOLDER)
+                        .join(constants::DB_FILENAME);
+                    if lib_db_path.exists() {
+                        if let Ok(lib_conn) = db::open_db(&lib_db_path) {
+                            if let Ok(uuid) = db::app_schema::get_or_create_library_uuid(&lib_conn) {
+                                let _ = db::app_schema::upsert_library(&app_conn, &uuid, path, label);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // firstRunCompleted
+    if let Some(frc) = store.get("firstRunCompleted") {
+        let _ = db::app_schema::set_setting(&app_conn, "first_run_completed", &frc.to_string());
+    }
+
+    // theme
+    if let Some(theme) = store.get("theme").and_then(|v| v.as_str().map(|s| s.to_string())) {
+        let _ = db::app_schema::set_setting(&app_conn, "theme", &theme);
+    }
+
+    // licenseStateCache
+    if let Some(lsc) = store.get("licenseStateCache") {
+        let _ = db::app_schema::set_setting(&app_conn, "license_state_cache", &lsc.to_string());
+    }
+
+    // Mark as migrated (do not delete old store file, per spec 6.3)
+    let _ = db::app_schema::set_setting(&app_conn, "tauri_store_migrated", "true");
+
+    eprintln!("Migrated Tauri Store settings to App DB");
+}
+
+/// Import legacy ~/.dadcam/custom_cameras.json into App DB (one-time migration).
+fn import_legacy_devices_at_startup() {
+    let conn = match db::app_db::open_app_db_connection() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let count = db::app_schema::import_legacy_devices_json(&conn);
+    if count > 0 {
+        eprintln!("Imported {} legacy camera devices to App DB", count);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize App DB (creates ~/.dadcam/app.db with migrations)
+    // Must run before Tauri app starts so commands can use it.
+    if let Err(e) = db::app_db::ensure_app_db_initialized() {
+        eprintln!("Warning: Failed to initialize App DB: {}", e);
+        // Non-fatal: app can still run but registry/settings features will fail gracefully
+    }
+
+    // Sync bundled camera profiles to App DB (idempotent)
+    sync_bundled_profiles_at_startup();
+
+    // Import legacy ~/.dadcam/custom_cameras.json into App DB (one-time)
+    import_legacy_devices_at_startup();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(DbState(Mutex::new(None)))
+        .setup(|app| {
+            migrate_tauri_store_to_app_db(app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Phase 3 commands from commands module
             commands::open_library,
@@ -187,6 +388,7 @@ pub fn run() {
             commands::remove_recent_library,
             commands::get_recent_libraries,
             commands::validate_library_path,
+            commands::list_registry_libraries,
             // Stills export command
             commands::export_still,
             // Events commands (Phase 6)
@@ -213,13 +415,16 @@ pub fn run() {
             commands::start_vhs_export,
             commands::get_export_history,
             commands::cancel_export,
-            // Camera system commands (Phase 5)
+            // Camera system commands (Phase 2: App DB)
             commands::list_camera_profiles,
             commands::list_camera_devices,
             commands::register_camera_device,
             commands::match_camera,
             commands::import_camera_db,
             commands::export_camera_db,
+            commands::create_user_camera_profile,
+            commands::update_user_camera_profile,
+            commands::delete_user_camera_profile,
             // Dev menu commands (Phase 9)
             commands::test_ffmpeg,
             commands::clear_caches,
@@ -228,6 +433,12 @@ pub fn run() {
             commands::execute_raw_sql,
             commands::generate_rental_keys,
             commands::get_db_stats,
+            // Profile staging commands (spec 3.6)
+            commands::stage_profile_edit,
+            commands::list_staged_profiles,
+            commands::validate_staged_profiles,
+            commands::publish_staged_profiles,
+            commands::discard_staged_profiles,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

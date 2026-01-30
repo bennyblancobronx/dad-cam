@@ -284,7 +284,8 @@ pub fn get_clips_needing_previews(
                   c.media_type, c.title, c.duration_ms, c.width, c.height, c.fps,
                   c.codec, c.audio_codec, c.audio_channels, c.audio_sample_rate,
                   c.recorded_at, c.recorded_at_offset_minutes,
-                  c.recorded_at_is_estimated, c.timestamp_source, c.source_folder, c.created_at
+                  c.recorded_at_is_estimated, c.timestamp_source, c.source_folder, c.created_at,
+                  c.camera_profile_type, c.camera_profile_ref, c.camera_device_uuid
            FROM clips c
            WHERE c.library_id = ?1
            AND NOT EXISTS (
@@ -317,6 +318,9 @@ pub fn get_clips_needing_previews(
             timestamp_source: row.get(17)?,
             source_folder: row.get(18)?,
             created_at: row.get(19)?,
+            camera_profile_type: row.get(20)?,
+            camera_profile_ref: row.get(21)?,
+            camera_device_uuid: row.get(22)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 

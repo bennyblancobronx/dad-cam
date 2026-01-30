@@ -2,7 +2,7 @@
 // Calls to Tauri backend for app settings persistence
 
 import { invoke } from '@tauri-apps/api/core';
-import type { AppSettings, AppMode, RecentProject } from '../types/settings';
+import type { AppSettings, AppMode, RecentProject, RegistryLibraryEntry } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 
 /** Get app settings from persistent store */
@@ -53,4 +53,9 @@ export async function getRecentLibraries(): Promise<RecentProject[]> {
 /** Validate if a library path exists and is valid */
 export async function validateLibraryPath(path: string): Promise<boolean> {
   return await invoke<boolean>('validate_library_path', { path });
+}
+
+/** List libraries from App DB registry (Phase 6: survives library deletion) */
+export async function listRegistryLibraries(): Promise<RegistryLibraryEntry[]> {
+  return await invoke<RegistryLibraryEntry[]>('list_registry_libraries');
 }

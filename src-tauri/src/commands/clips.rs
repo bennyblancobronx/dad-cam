@@ -95,8 +95,7 @@ fn clip_to_response(conn: &rusqlite::Connection, clip: Clip) -> ClipResponse {
 /// Get clips with basic pagination (backward compatible)
 #[tauri::command]
 pub fn get_clips(state: State<DbState>, limit: i64, offset: i64) -> Result<Vec<ClipResponse>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get library ID (assuming single library for now)
     let lib: Library = conn.query_row(
@@ -112,11 +111,11 @@ pub fn get_clips(state: State<DbState>, limit: i64, offset: i64) -> Result<Vec<C
         }),
     ).map_err(|e| e.to_string())?;
 
-    let clips = schema::list_clips(conn, lib.id, limit, offset).map_err(|e| e.to_string())?;
+    let clips = schema::list_clips(&conn, lib.id, limit, offset).map_err(|e| e.to_string())?;
 
     let responses: Vec<ClipResponse> = clips
         .into_iter()
-        .map(|c| clip_to_response(conn, c))
+        .map(|c| clip_to_response(&conn, c))
         .collect();
 
     Ok(responses)
@@ -125,21 +124,19 @@ pub fn get_clips(state: State<DbState>, limit: i64, offset: i64) -> Result<Vec<C
 /// Get a single clip by ID (backward compatible)
 #[tauri::command]
 pub fn get_clip(state: State<DbState>, id: i64) -> Result<ClipResponse, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let clip = schema::get_clip(conn, id)
+    let clip = schema::get_clip(&conn, id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Clip {} not found", id))?;
 
-    Ok(clip_to_response(conn, clip))
+    Ok(clip_to_response(&conn, clip))
 }
 
 /// Enhanced clip query with filtering, sorting, and asset paths for Phase 3 UI
 #[tauri::command]
 pub fn get_clips_filtered(state: State<DbState>, query: ClipQuery) -> Result<ClipListResponse, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get library ID
     let library_id: i64 = conn.query_row(
@@ -291,8 +288,7 @@ pub fn get_clips_filtered(state: State<DbState>, query: ClipQuery) -> Result<Cli
 /// Get a single clip with asset paths for Phase 3 UI
 #[tauri::command]
 pub fn get_clip_view(state: State<DbState>, id: i64) -> Result<ClipView, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     let sql = r#"SELECT
         c.id, c.title, c.media_type, c.duration_ms, c.width, c.height, c.recorded_at,

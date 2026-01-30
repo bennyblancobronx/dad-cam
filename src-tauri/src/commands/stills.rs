@@ -43,21 +43,20 @@ pub fn export_still(
     }
 
     // Get database connection
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get clip info
-    let clip = schema::get_clip(conn, request.clip_id)
+    let clip = schema::get_clip(&conn, request.clip_id)
         .map_err(|e| e.to_string())?
         .ok_or("Clip not found")?;
 
     // Get original asset path
-    let original_asset = schema::get_asset(conn, clip.original_asset_id)
+    let original_asset = schema::get_asset(&conn, clip.original_asset_id)
         .map_err(|e| e.to_string())?
         .ok_or("Original asset not found")?;
 
     // Get library root to build full path
-    let library = schema::get_library(conn, clip.library_id)
+    let library = schema::get_library(&conn, clip.library_id)
         .map_err(|e| e.to_string())?
         .ok_or("Library not found")?;
 

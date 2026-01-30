@@ -3,18 +3,23 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { CameraProfile, CameraDevice } from '../types/cameras';
+import { parseMatchRules } from '../types/cameras';
 import { listCameraProfiles, listCameraDevices, registerCameraDevice } from '../api/cameras';
 
-export function CamerasView() {
+interface CamerasViewProps {
+  onBack?: () => void;
+}
+
+export function CamerasView({ onBack }: CamerasViewProps = {}) {
   const [profiles, setProfiles] = useState<CameraProfile[]>([]);
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Registration form
+  // Registration form: stores "profileType:profileRef" composite key
   const [showRegister, setShowRegister] = useState(false);
-  const [regProfileId, setRegProfileId] = useState<string>('');
+  const [regProfileKey, setRegProfileKey] = useState<string>('');
   const [regSerial, setRegSerial] = useState('');
   const [regLabel, setRegLabel] = useState('');
   const [regNotes, setRegNotes] = useState('');
@@ -37,8 +42,18 @@ export function CamerasView() {
 
   const handleRegister = async () => {
     try {
+      let profileType: string | undefined;
+      let profileRef: string | undefined;
+      if (regProfileKey) {
+        const idx = regProfileKey.indexOf(':');
+        if (idx > 0) {
+          profileType = regProfileKey.slice(0, idx);
+          profileRef = regProfileKey.slice(idx + 1);
+        }
+      }
       await registerCameraDevice({
-        profileId: regProfileId ? parseInt(regProfileId, 10) : undefined,
+        profileType,
+        profileRef,
         serialNumber: regSerial.trim() || undefined,
         fleetLabel: regLabel.trim() || undefined,
         rentalNotes: regNotes.trim() || undefined,
@@ -46,7 +61,7 @@ export function CamerasView() {
       });
       setMessage('Device registered');
       setShowRegister(false);
-      setRegProfileId('');
+      setRegProfileKey('');
       setRegSerial('');
       setRegLabel('');
       setRegNotes('');
@@ -57,10 +72,10 @@ export function CamerasView() {
     }
   };
 
-  const getProfileName = (profileId: number | null): string => {
-    if (!profileId) return 'Unknown';
-    const profile = profiles.find(p => p.id === profileId);
-    return profile ? profile.name : `Profile #${profileId}`;
+  const getProfileName = (pType: string, pRef: string): string => {
+    if (!pType || pType === 'none') return 'No profile';
+    const profile = profiles.find(p => p.profileType === pType && p.profileRef === pRef);
+    return profile ? profile.name : `${pType}:${pRef}`;
   };
 
   if (isLoading) {
@@ -75,7 +90,18 @@ export function CamerasView() {
   return (
     <div className="cameras-view">
       <div className="settings-section">
-        <h2 className="settings-section-title">Cameras</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {onBack && (
+            <button
+              className="secondary-button"
+              onClick={onBack}
+              style={{ padding: '4px 12px', fontSize: 13 }}
+            >
+              Back
+            </button>
+          )}
+          <h2 className="settings-section-title" style={{ margin: 0 }}>Cameras</h2>
+        </div>
         <p className="settings-section-description">
           Registered devices and matched camera profiles.
         </p>
@@ -100,12 +126,12 @@ export function CamerasView() {
                 <label className="form-label">CAMERA PROFILE</label>
                 <select
                   className="form-select"
-                  value={regProfileId}
-                  onChange={(e) => setRegProfileId(e.target.value)}
+                  value={regProfileKey}
+                  onChange={(e) => setRegProfileKey(e.target.value)}
                 >
                   <option value="">-- None (generic) --</option>
                   {profiles.map((p) => (
-                    <option key={p.id} value={String(p.id)}>{p.name}</option>
+                    <option key={`${p.profileType}:${p.profileRef}`} value={`${p.profileType}:${p.profileRef}`}>{p.name}</option>
                   ))}
                 </select>
               </div>
@@ -134,12 +160,12 @@ export function CamerasView() {
           )}
 
           {devices.map((d) => (
-            <div key={d.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--color-border)' }}>
+            <div key={d.uuid} style={{ padding: '8px 0', borderBottom: '1px solid var(--color-border)' }}>
               <div style={{ fontWeight: 500, fontSize: 14 }}>
-                {d.fleetLabel || getProfileName(d.profileId) || `Device #${d.id}`}
+                {d.fleetLabel || getProfileName(d.profileType, d.profileRef) || `Device ${d.uuid.slice(0, 8)}`}
               </div>
               <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                {d.profileId ? getProfileName(d.profileId) : 'No profile'}
+                {d.profileType !== 'none' ? getProfileName(d.profileType, d.profileRef) : 'No profile'}
                 {d.serialNumber ? ` -- S/N: ${d.serialNumber}` : ''}
               </div>
             </div>
@@ -158,15 +184,19 @@ export function CamerasView() {
             </p>
           )}
 
-          {profiles.map((p) => (
-            <div key={p.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--color-border)' }}>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>{p.name}</div>
-              <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                {p.matchRules.make?.join(', ') || ''} {p.matchRules.model?.join(', ') || ''}
-                {' -- v' + p.version}
+          {profiles.map((p) => {
+            const rules = parseMatchRules(p.matchRules);
+            return (
+              <div key={`${p.profileType}:${p.profileRef}`} style={{ padding: '8px 0', borderBottom: '1px solid var(--color-border)' }}>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 2 }}>
+                  {rules.make?.join(', ') || ''} {rules.model?.join(', ') || ''}
+                  {' -- v' + p.version}
+                  {p.profileType === 'user' ? ' (user)' : ''}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

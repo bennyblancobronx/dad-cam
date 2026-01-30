@@ -1,16 +1,17 @@
 // Dad Cam - Project Dashboard (Advanced Mode)
 // Multi-project selection view with card grid
 
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { LibraryInfo } from '../types/clips';
-import type { AppSettings } from '../types/settings';
+import type { AppSettings, RegistryLibraryEntry } from '../types/settings';
 import { openLibrary, createLibrary } from '../api/clips';
 import {
   addRecentLibrary,
   validateLibraryPath,
   removeRecentLibrary,
   getAppSettings,
+  listRegistryLibraries,
 } from '../api/settings';
 import { clearThumbnailCache } from '../utils/thumbnailCache';
 import { LibraryCard } from './LibraryCard';
@@ -20,6 +21,7 @@ interface LibraryDashboardProps {
   onLibrarySelect: (library: LibraryInfo) => void;
   onSettingsChange: (settings: AppSettings) => void;
   onNavigateToSettings: () => void;
+  onNavigateToCameras?: () => void;
 }
 
 export function LibraryDashboard({
@@ -27,12 +29,31 @@ export function LibraryDashboard({
   onLibrarySelect,
   onSettingsChange,
   onNavigateToSettings,
+  onNavigateToCameras,
 }: LibraryDashboardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [libraryPath, setLibraryPath] = useState('');
   const [newLibraryName, setNewLibraryName] = useState('');
+  const [registryLibraries, setRegistryLibraries] = useState<RegistryLibraryEntry[]>([]);
+
+  // Load registry libraries on mount
+  useEffect(() => {
+    listRegistryLibraries()
+      .then(setRegistryLibraries)
+      .catch((err) => console.error('Failed to load registry libraries:', err));
+  }, []);
+
+  // Refresh registry after library operations
+  const refreshRegistry = useCallback(async () => {
+    try {
+      const libs = await listRegistryLibraries();
+      setRegistryLibraries(libs);
+    } catch {
+      // Best-effort
+    }
+  }, []);
 
   // Open existing library via folder picker
   const handleOpenLibrary = useCallback(async () => {
@@ -58,6 +79,7 @@ export function LibraryDashboard({
       await addRecentLibrary(selected as string, lib.name, lib.clipCount);
       const updatedSettings = await getAppSettings();
       onSettingsChange(updatedSettings);
+      refreshRegistry();
 
       onLibrarySelect(lib);
     } catch (err) {
@@ -67,7 +89,7 @@ export function LibraryDashboard({
     } finally {
       setIsLoading(false);
     }
-  }, [onLibrarySelect, onSettingsChange]);
+  }, [onLibrarySelect, onSettingsChange, refreshRegistry]);
 
   // Open a recent library
   const handleSelectRecent = useCallback(async (path: string, name: string) => {
@@ -90,6 +112,7 @@ export function LibraryDashboard({
       await addRecentLibrary(path, lib.name, lib.clipCount);
       const updatedSettings = await getAppSettings();
       onSettingsChange(updatedSettings);
+      refreshRegistry();
 
       onLibrarySelect(lib);
     } catch (err) {
@@ -99,7 +122,7 @@ export function LibraryDashboard({
     } finally {
       setIsLoading(false);
     }
-  }, [onLibrarySelect, onSettingsChange]);
+  }, [onLibrarySelect, onSettingsChange, refreshRegistry]);
 
   // Browse for folder
   const handleBrowseFolder = useCallback(async () => {
@@ -135,6 +158,7 @@ export function LibraryDashboard({
       await addRecentLibrary(libraryPath.trim(), lib.name, lib.clipCount);
       const updatedSettings = await getAppSettings();
       onSettingsChange(updatedSettings);
+      refreshRegistry();
 
       setShowCreateForm(false);
       setLibraryPath('');
@@ -148,7 +172,7 @@ export function LibraryDashboard({
     } finally {
       setIsLoading(false);
     }
-  }, [libraryPath, newLibraryName, onLibrarySelect, onSettingsChange]);
+  }, [libraryPath, newLibraryName, onLibrarySelect, onSettingsChange, refreshRegistry]);
 
   // Remove a library from recent list
   const handleRemoveRecent = useCallback(async (path: string, e: React.MouseEvent) => {
@@ -157,10 +181,11 @@ export function LibraryDashboard({
       await removeRecentLibrary(path);
       const updatedSettings = await getAppSettings();
       onSettingsChange(updatedSettings);
+      refreshRegistry();
     } catch (err) {
       console.error('Failed to remove library:', err);
     }
-  }, [onSettingsChange]);
+  }, [onSettingsChange, refreshRegistry]);
 
   return (
     <div className="library-dashboard">
@@ -256,22 +281,33 @@ export function LibraryDashboard({
           </div>
         ) : (
           <>
-            {/* Recent Libraries Grid */}
-            {settings.recentProjects.length > 0 && (
+            {/* Recent Libraries Grid -- from App DB registry */}
+            {registryLibraries.length > 0 && (
               <section className="library-section">
                 <h2 className="library-section-title">Recent Projects</h2>
                 <div className="library-grid">
-                  {settings.recentProjects.map((lib) => (
-                    <div key={lib.path} className="library-grid-item">
+                  {registryLibraries.map((lib) => (
+                    <div key={lib.libraryUuid} className="library-grid-item">
                       <LibraryCard
-                        library={lib}
-                        onSelect={() => handleSelectRecent(lib.path, lib.name)}
+                        library={{
+                          path: lib.path,
+                          name: lib.label || lib.path.split('/').pop() || 'Untitled',
+                          lastOpened: lib.lastOpenedAt || '',
+                          clipCount: lib.clipCount,
+                          thumbnailPath: lib.thumbnailPath || undefined,
+                        }}
+                        onSelect={() => handleSelectRecent(lib.path, lib.label || lib.path.split('/').pop() || 'Untitled')}
                         isLoading={isLoading}
                       />
+                      {lib.isMissing && (
+                        <div className="library-missing-badge" title="Library not found at this path">
+                          Missing
+                        </div>
+                      )}
                       <button
                         className="library-remove-button"
                         onClick={(e) => handleRemoveRecent(lib.path, e)}
-                        aria-label={`Remove ${lib.name} from recent`}
+                        aria-label={`Remove ${lib.label || 'library'} from recent`}
                         title="Remove from recent"
                       >
                         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -309,10 +345,26 @@ export function LibraryDashboard({
                 </svg>
                 <span>{isLoading ? 'Opening...' : 'Open Project'}</span>
               </button>
+              {/* Cameras button -- works without library open (Phase 6) */}
+              {settings.featureFlags.camerasTab && onNavigateToCameras && (
+                <button
+                  className="library-action-button"
+                  onClick={onNavigateToCameras}
+                  disabled={isLoading}
+                  title="Manage camera profiles and devices"
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="2" y="6" width="20" height="12" rx="2" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M17 6V4h-4" />
+                  </svg>
+                  <span>Cameras</span>
+                </button>
+              )}
             </section>
 
             {/* Empty state */}
-            {settings.recentProjects.length === 0 && (
+            {registryLibraries.length === 0 && (
               <div className="library-empty-state">
                 <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />

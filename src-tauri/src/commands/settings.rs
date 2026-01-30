@@ -1,15 +1,19 @@
 // Dad Cam - App Settings Commands
-// Persistent app-level settings via Tauri Store plugin
+// Persistent app-level settings via App DB (spec section 6.3)
+// Settings are stored in the app_settings KV table at ~/.dadcam/app.db.
+// The Tauri Store (settings.json) is migrated once at startup (lib.rs) and
+// no longer used as the primary store.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
+
+use crate::db;
+use crate::constants;
 
 /// App settings schema version
 const SETTINGS_VERSION: u32 = 2;
-const SETTINGS_FILE: &str = "settings.json";
 const MAX_RECENT_PROJECTS: usize = 10;
 
 /// App mode: simple (single project, auto-open) or advanced (multi-project)
@@ -148,108 +152,79 @@ impl Default for AppSettings {
     }
 }
 
-/// Get app settings from store, with v1->v2 migration
+/// Get app settings from App DB
 #[tauri::command]
-pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
-    let store = app.store(SETTINGS_FILE).map_err(|e| e.to_string())?;
+pub fn get_app_settings(_app: AppHandle) -> Result<AppSettings, String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
 
-    // Check stored version
-    let version = store
-        .get("version")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
-        .unwrap_or(0);
+    // UI mode
+    let mode_str = db::app_schema::get_ui_mode(&conn).map_err(|e| e.to_string())?;
+    let mode = match mode_str.as_str() {
+        "advanced" => AppMode::Advanced,
+        _ => AppMode::Simple,
+    };
 
-    // v1->v2 migration: old settings used "personal"/"pro" and "recentLibraries"
-    if version < 2 {
-        // Read v1 fields
-        let old_mode_str = store
-            .get("mode")
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| "personal".to_string());
-
-        let mode = match old_mode_str.as_str() {
-            "pro" | "advanced" => AppMode::Advanced,
-            _ => AppMode::Simple,
-        };
-
-        let default_project_path = store
-            .get("lastLibraryPath")
-            .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-        // Migrate recentLibraries -> recentProjects
-        let recent_projects: Vec<RecentProject> = store
-            .get("recentLibraries")
-            .and_then(|v| serde_json::from_value::<Vec<RecentProject>>(v.clone()).ok())
-            .unwrap_or_default();
-
-        // Existing users skip the wizard
-        let first_run_completed = store.get("version").is_some();
-
-        let feature_flags = FeatureFlags::defaults_for_mode(&mode);
-
-        let settings = AppSettings {
-            version: SETTINGS_VERSION,
-            mode,
-            first_run_completed,
-            theme: "light".to_string(),
-            default_project_path,
-            recent_projects,
-            feature_flags,
-            dev_menu: DevMenuSettings::default(),
-            license_state_cache: None,
-        };
-
-        // Persist the migrated settings immediately
-        save_app_settings_inner(&store, &settings)?;
-
-        return Ok(settings);
-    }
-
-    // v2 load: read each field with fallbacks
-    let mode = store
-        .get("mode")
-        .map(|v| {
-            if v.as_str() == Some("advanced") {
-                AppMode::Advanced
-            } else {
-                AppMode::Simple
-            }
-        })
-        .unwrap_or_default();
-
-    let first_run_completed = store
-        .get("firstRunCompleted")
-        .and_then(|v| v.as_bool())
+    // First run completed
+    let first_run_completed = db::app_schema::get_setting(&conn, "first_run_completed")
+        .map_err(|e| e.to_string())?
+        .map(|v| v == "true")
         .unwrap_or(false);
 
-    let theme = store
-        .get("theme")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
+    // Theme
+    let theme = db::app_schema::get_setting(&conn, "theme")
+        .map_err(|e| e.to_string())?
         .unwrap_or_else(|| "light".to_string());
 
-    let default_project_path = store
-        .get("defaultProjectPath")
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    // Default project path (resolve from UUID -> registry path)
+    let default_project_path = db::app_schema::get_simple_default_library_uuid(&conn)
+        .ok()
+        .flatten()
+        .and_then(|uuid| {
+            db::app_schema::get_library_by_uuid(&conn, &uuid)
+                .ok()
+                .flatten()
+                .map(|lib| lib.path)
+        });
 
-    let recent_projects = store
-        .get("recentProjects")
-        .and_then(|v| serde_json::from_value::<Vec<RecentProject>>(v.clone()).ok())
-        .unwrap_or_default();
+    // Recent projects from libraries registry
+    let registry = db::app_schema::list_recent_libraries(&conn)
+        .map_err(|e| e.to_string())?;
+    let recent_projects: Vec<RecentProject> = registry.iter()
+        .take(MAX_RECENT_PROJECTS)
+        .map(|lib| {
+            let thumbnail_path = get_library_thumbnail(&lib.path);
+            let clip_count = get_library_clip_count(&lib.path);
+            RecentProject {
+                path: lib.path.clone(),
+                name: lib.label.clone().unwrap_or_else(|| {
+                    Path::new(&lib.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string())
+                }),
+                last_opened: lib.last_opened_at.clone().unwrap_or_default(),
+                clip_count,
+                thumbnail_path,
+            }
+        })
+        .collect();
 
-    let feature_flags = store
-        .get("featureFlags")
-        .and_then(|v| serde_json::from_value::<FeatureFlags>(v.clone()).ok())
+    // Feature flags
+    let feature_flags = db::app_schema::get_setting(&conn, "features")
+        .map_err(|e| e.to_string())?
+        .and_then(|s| serde_json::from_str::<FeatureFlags>(&s).ok())
         .unwrap_or_else(|| FeatureFlags::defaults_for_mode(&mode));
 
-    let dev_menu = store
-        .get("devMenu")
-        .and_then(|v| serde_json::from_value::<DevMenuSettings>(v.clone()).ok())
+    // Dev menu
+    let dev_menu = db::app_schema::get_setting(&conn, "dev_menu")
+        .map_err(|e| e.to_string())?
+        .and_then(|s| serde_json::from_str::<DevMenuSettings>(&s).ok())
         .unwrap_or_default();
 
-    let license_state_cache = store
-        .get("licenseStateCache")
-        .and_then(|v| serde_json::from_value::<LicenseStateCache>(v.clone()).ok());
+    // License state cache
+    let license_state_cache = db::app_schema::get_setting(&conn, "license_state_cache")
+        .map_err(|e| e.to_string())?
+        .and_then(|s| serde_json::from_str::<LicenseStateCache>(&s).ok());
 
     Ok(AppSettings {
         version: SETTINGS_VERSION,
@@ -264,85 +239,98 @@ pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
     })
 }
 
-/// Internal save helper (takes store reference)
-fn save_app_settings_inner(
-    store: &tauri_plugin_store::Store<tauri::Wry>,
-    settings: &AppSettings,
-) -> Result<(), String> {
-    store.set("version", serde_json::json!(settings.version));
-    store.set(
-        "mode",
-        serde_json::json!(match settings.mode {
-            AppMode::Simple => "simple",
-            AppMode::Advanced => "advanced",
-        }),
-    );
-    store.set("firstRunCompleted", serde_json::json!(settings.first_run_completed));
-    store.set("theme", serde_json::json!(settings.theme));
-    store.set(
-        "defaultProjectPath",
-        match &settings.default_project_path {
-            Some(p) => serde_json::json!(p),
-            None => serde_json::Value::Null,
-        },
-    );
-    store.set(
-        "recentProjects",
-        serde_json::to_value(&settings.recent_projects).map_err(|e| e.to_string())?,
-    );
-    store.set(
-        "featureFlags",
-        serde_json::to_value(&settings.feature_flags).map_err(|e| e.to_string())?,
-    );
-    store.set(
-        "devMenu",
-        serde_json::to_value(&settings.dev_menu).map_err(|e| e.to_string())?,
-    );
-    store.set(
-        "licenseStateCache",
-        match &settings.license_state_cache {
-            Some(c) => serde_json::to_value(c).map_err(|e| e.to_string())?,
-            None => serde_json::Value::Null,
-        },
-    );
-
-    // Clean up old v1 keys if present
-    store.delete("lastLibraryPath");
-    store.delete("recentLibraries");
-
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Save app settings to store
+/// Save app settings to App DB
 #[tauri::command]
-pub fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
-    let store = app.store(SETTINGS_FILE).map_err(|e| e.to_string())?;
-    save_app_settings_inner(&store, &settings)
+pub fn save_app_settings(_app: AppHandle, settings: AppSettings) -> Result<(), String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+
+    // UI mode
+    let mode_str = match settings.mode {
+        AppMode::Simple => "simple",
+        AppMode::Advanced => "advanced",
+    };
+    db::app_schema::set_ui_mode(&conn, mode_str).map_err(|e| e.to_string())?;
+
+    // First run completed
+    db::app_schema::set_setting(&conn, "first_run_completed", &settings.first_run_completed.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Theme
+    db::app_schema::set_setting(&conn, "theme", &settings.theme)
+        .map_err(|e| e.to_string())?;
+
+    // Feature flags
+    let ff_json = serde_json::to_string(&settings.feature_flags).map_err(|e| e.to_string())?;
+    db::app_schema::set_features(&conn, &ff_json).map_err(|e| e.to_string())?;
+
+    // Dev menu
+    let dm_json = serde_json::to_string(&settings.dev_menu).map_err(|e| e.to_string())?;
+    db::app_schema::set_setting(&conn, "dev_menu", &dm_json).map_err(|e| e.to_string())?;
+
+    // Title offset (individual key per spec)
+    db::app_schema::set_title_offset(&conn, settings.dev_menu.title_start_seconds)
+        .map_err(|e| e.to_string())?;
+
+    // License state cache
+    match &settings.license_state_cache {
+        Some(lsc) => {
+            let lsc_json = serde_json::to_string(lsc).map_err(|e| e.to_string())?;
+            db::app_schema::set_setting(&conn, "license_state_cache", &lsc_json)
+                .map_err(|e| e.to_string())?;
+        }
+        None => {
+            let _ = db::app_schema::delete_setting(&conn, "license_state_cache");
+        }
+    }
+
+    // Default project path -> resolve to UUID and store
+    if let Some(ref path) = settings.default_project_path {
+        let lib_db_path = Path::new(path)
+            .join(constants::DADCAM_FOLDER)
+            .join(constants::DB_FILENAME);
+        if lib_db_path.exists() {
+            if let Ok(lib_conn) = db::open_db(&lib_db_path) {
+                if let Ok(uuid) = db::app_schema::get_or_create_library_uuid(&lib_conn) {
+                    let _ = db::app_schema::set_simple_default_library_uuid(&conn, &uuid);
+                }
+            }
+        }
+    } else {
+        let _ = db::app_schema::set_setting(&conn, "simple_default_library_uuid", "");
+    }
+
+    // Note: recentProjects are derived from the libraries registry table,
+    // not stored as a separate KV setting. They are read-only in this context.
+
+    Ok(())
 }
 
 /// Get current mode
 #[tauri::command]
-pub fn get_mode(app: AppHandle) -> Result<String, String> {
-    let settings = get_app_settings(app)?;
-    Ok(match settings.mode {
-        AppMode::Simple => "simple".to_string(),
-        AppMode::Advanced => "advanced".to_string(),
-    })
+pub fn get_mode(_app: AppHandle) -> Result<String, String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    db::app_schema::get_ui_mode(&conn).map_err(|e| e.to_string())
 }
 
 /// Set mode
 #[tauri::command]
-pub fn set_mode(app: AppHandle, mode: String) -> Result<(), String> {
-    let mut settings = get_app_settings(app.clone())?;
+pub fn set_mode(_app: AppHandle, mode: String) -> Result<(), String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+
     let new_mode = match mode.as_str() {
         "advanced" => AppMode::Advanced,
         _ => AppMode::Simple,
     };
-    // Update feature flags when mode changes
-    settings.feature_flags = FeatureFlags::defaults_for_mode(&new_mode);
-    settings.mode = new_mode;
-    save_app_settings(app, settings)
+
+    // Update mode
+    db::app_schema::set_ui_mode(&conn, &mode).map_err(|e| e.to_string())?;
+
+    // Update feature flags to match mode
+    let feature_flags = FeatureFlags::defaults_for_mode(&new_mode);
+    let ff_json = serde_json::to_string(&feature_flags).map_err(|e| e.to_string())?;
+    db::app_schema::set_features(&conn, &ff_json).map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Get the thumbnail path for the first clip in a library (for library card display)
@@ -377,59 +365,111 @@ fn get_library_thumbnail(library_path: &str) -> Option<String> {
     None
 }
 
-/// Add or update a recent project entry
+/// Get the clip count for a library (for library card display)
+fn get_library_clip_count(library_path: &str) -> i64 {
+    let db_path = Path::new(library_path).join(".dadcam").join("dadcam.db");
+    if !db_path.exists() {
+        return 0;
+    }
+    let conn = match Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    conn.query_row("SELECT COUNT(*) FROM clips", [], |row| row.get(0))
+        .unwrap_or(0)
+}
+
+/// Add or update a recent project entry (upserts into App DB registry)
 #[tauri::command]
 pub fn add_recent_library(
-    app: AppHandle,
+    _app: AppHandle,
     path: String,
     name: String,
-    clip_count: i64,
+    _clip_count: i64,
 ) -> Result<(), String> {
-    let mut settings = get_app_settings(app.clone())?;
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
 
-    let now = chrono::Utc::now().to_rfc3339();
-    let thumbnail_path = get_library_thumbnail(&path);
+    // Open library DB to get UUID
+    let lib_db_path = Path::new(&path)
+        .join(constants::DADCAM_FOLDER)
+        .join(constants::DB_FILENAME);
 
-    // Remove existing entry with same path
-    settings.recent_projects.retain(|p| p.path != path);
-
-    // Add at front
-    settings.recent_projects.insert(
-        0,
-        RecentProject {
-            path: path.clone(),
-            name,
-            last_opened: now,
-            clip_count,
-            thumbnail_path,
-        },
-    );
-
-    settings.recent_projects.truncate(MAX_RECENT_PROJECTS);
-    settings.default_project_path = Some(path);
-
-    save_app_settings(app, settings)
-}
-
-/// Remove a project from recent list
-#[tauri::command]
-pub fn remove_recent_library(app: AppHandle, path: String) -> Result<(), String> {
-    let mut settings = get_app_settings(app.clone())?;
-
-    settings.recent_projects.retain(|p| p.path != path);
-
-    if settings.default_project_path.as_ref() == Some(&path) {
-        settings.default_project_path = settings.recent_projects.first().map(|p| p.path.clone());
+    if !lib_db_path.exists() {
+        return Err(format!("Library database not found at {}", path));
     }
 
-    save_app_settings(app, settings)
+    let lib_conn = db::open_db(&lib_db_path).map_err(|e| e.to_string())?;
+    let uuid = db::app_schema::get_or_create_library_uuid(&lib_conn)
+        .map_err(|e| e.to_string())?;
+
+    // Upsert into registry and mark as opened
+    db::app_schema::upsert_library(&conn, &uuid, &path, Some(&name))
+        .map_err(|e| e.to_string())?;
+    db::app_schema::mark_opened(&conn, &uuid)
+        .map_err(|e| e.to_string())?;
+
+    // Update default project path
+    let _ = db::app_schema::set_simple_default_library_uuid(&conn, &uuid);
+
+    Ok(())
 }
 
-/// Get recent projects list
+/// Remove a project from recent list (deletes from App DB registry)
 #[tauri::command]
-pub fn get_recent_libraries(app: AppHandle) -> Result<Vec<RecentProject>, String> {
-    let settings = get_app_settings(app)?;
-    Ok(settings.recent_projects)
+pub fn remove_recent_library(_app: AppHandle, path: String) -> Result<(), String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+
+    // Match both raw and canonicalized paths
+    let canonical = std::fs::canonicalize(&path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| path.clone());
+
+    conn.execute(
+        "DELETE FROM libraries WHERE path = ?1 OR path = ?2",
+        params![path, canonical],
+    ).map_err(|e| e.to_string())?;
+
+    // If the deleted library was the default, pick the next most recent
+    if let Ok(Some(default_uuid)) = db::app_schema::get_simple_default_library_uuid(&conn) {
+        if let Ok(None) = db::app_schema::get_library_by_uuid(&conn, &default_uuid) {
+            let recents = db::app_schema::list_recent_libraries(&conn).unwrap_or_default();
+            if let Some(first) = recents.first() {
+                let _ = db::app_schema::set_simple_default_library_uuid(&conn, &first.library_uuid);
+            } else {
+                let _ = db::app_schema::set_setting(&conn, "simple_default_library_uuid", "");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Get recent projects list (from App DB registry)
+#[tauri::command]
+pub fn get_recent_libraries(_app: AppHandle) -> Result<Vec<RecentProject>, String> {
+    let conn = db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    let registry = db::app_schema::list_recent_libraries(&conn)
+        .map_err(|e| e.to_string())?;
+
+    Ok(registry.iter()
+        .take(MAX_RECENT_PROJECTS)
+        .map(|lib| {
+            let thumbnail_path = get_library_thumbnail(&lib.path);
+            let clip_count = get_library_clip_count(&lib.path);
+            RecentProject {
+                path: lib.path.clone(),
+                name: lib.label.clone().unwrap_or_else(|| {
+                    Path::new(&lib.path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string())
+                }),
+                last_opened: lib.last_opened_at.clone().unwrap_or_default(),
+                clip_count,
+                thumbnail_path,
+            }
+        })
+        .collect())
 }
 
 /// Check if a library path exists (for validation)

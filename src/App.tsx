@@ -17,6 +17,7 @@ import { clearThumbnailCache } from './utils/thumbnailCache';
 import { LibraryView } from './components/LibraryView';
 import { LibraryDashboard } from './components/LibraryDashboard';
 import { SettingsView } from './components/SettingsView';
+import { CamerasView } from './components/CamerasView';
 import { FirstRunWizard } from './components/FirstRunWizard';
 import { TrialBanner } from './components/TrialBanner';
 import { DevMenu } from './components/DevMenu';
@@ -45,8 +46,9 @@ function App() {
   // Error recovery state
   const [unmountedLibrary, setUnmountedLibrary] = useState<UnmountedLibrary | null>(null);
 
-  // App-level view state for Advanced mode settings
+  // App-level view state for Advanced mode settings and cameras
   const [showAppSettings, setShowAppSettings] = useState(false);
+  const [showCameras, setShowCameras] = useState(false);
 
   // Dev menu state
   const [showDevMenu, setShowDevMenu] = useState(false);
@@ -414,7 +416,7 @@ function App() {
     );
   }
 
-  // Advanced mode: show Library Dashboard or Settings
+  // Advanced mode: show Library Dashboard, Settings, or Cameras
   if (settings?.mode === 'advanced') {
     if (showAppSettings) {
       return (
@@ -430,6 +432,15 @@ function App() {
       );
     }
 
+    if (showCameras) {
+      return (
+        <ErrorBoundary>
+          {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
+          <CamerasView onBack={() => setShowCameras(false)} />
+        </ErrorBoundary>
+      );
+    }
+
     return (
       <ErrorBoundary>
         {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
@@ -438,6 +449,7 @@ function App() {
           onLibrarySelect={setLibrary}
           onSettingsChange={setSettings}
           onNavigateToSettings={() => setShowAppSettings(true)}
+          onNavigateToCameras={() => setShowCameras(true)}
         />
       </ErrorBoundary>
     );

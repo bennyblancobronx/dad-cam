@@ -2,7 +2,7 @@ Dad Cam App — Contracts (Non-Negotiables)
 
 These decisions are final. Do not revisit unless explicitly reopening.
 
-Version: 1.0
+Version: 1.1
 
 ---
 
@@ -175,6 +175,49 @@ Store which source was used in DB.
 - ffprobe: Metadata extraction, format detection
 - exiftool: Camera metadata, dates, make/model
 - All tools bundled with app (not system-installed)
+
+---
+
+19. Dual Database Model (App DB + Library DB)
+
+- App DB: `~/.dadcam/app.db` (user-global, survives library deletion/moves)
+  - Camera profiles (bundled + user-created)
+  - Registered camera devices
+  - Library registry (paths, labels, recents, pinned, missing)
+  - App settings (KV table)
+- Library DB: `<library>/.dadcam/dadcam.db` (project-local, portable with library folder)
+  - Clips, events, dates
+  - Sidecars / exif / derived asset references
+  - VHS edit recipes + outputs
+- Deleting or moving a library folder must NEVER delete profiles, devices, app settings, or registry entries
+
+---
+
+20. Stable Identity (No Name-Based Foreign Keys)
+
+- Never reference profiles by display name
+- Bundled profiles: `slug` is stable ID forever
+- User profiles: `uuid` is stable ID forever
+- `name` is display-only and may change freely
+- Clips reference cameras via `{profile_type, profile_ref, device_uuid}` not integer FKs
+
+---
+
+21. Library Identity Stored in Library
+
+- Single source of truth: `library_meta` table in Library DB stores `library_uuid`
+- On create/open: read UUID from library DB, generate if missing
+- App DB stores only UX registry keyed by `library_uuid`
+- Never identify a library by path alone
+
+---
+
+22. Short-Lived SQLite Connections
+
+- Do NOT store rusqlite::Connection in Tauri State (not Send)
+- Store only paths/config in State
+- Each command opens its own short-lived connection, does work, closes
+- Background workers open their own connections inside worker threads
 
 ---
 

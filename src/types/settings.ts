@@ -3,13 +3,25 @@
 /** App mode: simple (single project, auto-open) or advanced (multi-project) */
 export type AppMode = 'simple' | 'advanced';
 
-/** Recent project entry */
+/** Recent project entry (legacy Tauri Store format) */
 export interface RecentProject {
   path: string;
   name: string;
   lastOpened: string;
   clipCount: number;
   thumbnailPath?: string;
+}
+
+/** Library registry entry from App DB (Phase 6: stable, survives library deletion) */
+export interface RegistryLibraryEntry {
+  libraryUuid: string;
+  path: string;
+  label: string | null;
+  lastOpenedAt: string | null;
+  isPinned: boolean;
+  isMissing: boolean;
+  clipCount: number;
+  thumbnailPath: string | null;
 }
 
 /** Feature flags */

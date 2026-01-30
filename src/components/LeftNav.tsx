@@ -122,8 +122,8 @@ function CamerasSection() {
             <>
               <div className="nav-cameras-group-label">Registered Devices</div>
               {devices.map((d) => (
-                <div key={d.id} className="nav-cameras-item">
-                  <span className="nav-cameras-item-label">{d.fleetLabel || `Device ${d.id}`}</span>
+                <div key={d.uuid} className="nav-cameras-item">
+                  <span className="nav-cameras-item-label">{d.fleetLabel || `Device ${d.uuid.slice(0, 8)}`}</span>
                   {d.serialNumber && (
                     <span className="nav-cameras-item-meta">{d.serialNumber}</span>
                   )}
@@ -135,7 +135,7 @@ function CamerasSection() {
             <>
               <div className="nav-cameras-group-label">Matched Profiles</div>
               {profiles.map((p) => (
-                <div key={p.id} className="nav-cameras-item">
+                <div key={`${p.profileType}:${p.profileRef}`} className="nav-cameras-item">
                   <span className="nav-cameras-item-label">{p.name}</span>
                 </div>
               ))}

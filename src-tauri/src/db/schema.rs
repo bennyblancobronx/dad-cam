@@ -201,6 +201,10 @@ pub struct Clip {
     pub timestamp_source: Option<String>,
     pub source_folder: Option<String>,
     pub created_at: String,
+    // Stable camera references (Migration 7 / L6)
+    pub camera_profile_type: Option<String>,
+    pub camera_profile_ref: Option<String>,
+    pub camera_device_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,6 +227,10 @@ pub struct NewClip {
     pub recorded_at_is_estimated: bool,
     pub timestamp_source: Option<String>,
     pub source_folder: Option<String>,
+    // Stable camera references (Migration 7 / L6)
+    pub camera_profile_type: Option<String>,
+    pub camera_profile_ref: Option<String>,
+    pub camera_device_uuid: Option<String>,
 }
 
 pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
@@ -230,8 +238,9 @@ pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
         "INSERT INTO clips (library_id, original_asset_id, camera_profile_id, media_type, title,
                            duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                            audio_sample_rate, recorded_at, recorded_at_offset_minutes,
-                           recorded_at_is_estimated, timestamp_source, source_folder)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                           recorded_at_is_estimated, timestamp_source, source_folder,
+                           camera_profile_type, camera_profile_ref, camera_device_uuid)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             clip.library_id,
             clip.original_asset_id,
@@ -251,6 +260,9 @@ pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
             clip.recorded_at_is_estimated,
             clip.timestamp_source,
             clip.source_folder,
+            clip.camera_profile_type,
+            clip.camera_profile_ref,
+            clip.camera_device_uuid,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -261,7 +273,8 @@ pub fn get_clip(conn: &Connection, id: i64) -> Result<Option<Clip>> {
         "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                 duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                 audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                timestamp_source, source_folder, created_at
+                timestamp_source, source_folder, created_at,
+                camera_profile_type, camera_profile_ref, camera_device_uuid
          FROM clips WHERE id = ?1",
         params![id],
         |row| {
@@ -286,6 +299,9 @@ pub fn get_clip(conn: &Connection, id: i64) -> Result<Option<Clip>> {
                 timestamp_source: row.get(17)?,
                 source_folder: row.get(18)?,
                 created_at: row.get(19)?,
+                camera_profile_type: row.get(20)?,
+                camera_profile_ref: row.get(21)?,
+                camera_device_uuid: row.get(22)?,
             })
         },
     ).optional()?;
@@ -298,7 +314,8 @@ pub fn get_clip_by_asset(conn: &Connection, asset_id: i64) -> Result<Option<Clip
         "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                 duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                 audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                timestamp_source, source_folder, created_at
+                timestamp_source, source_folder, created_at,
+                camera_profile_type, camera_profile_ref, camera_device_uuid
          FROM clips WHERE original_asset_id = ?1",
         params![asset_id],
         |row| {
@@ -323,6 +340,9 @@ pub fn get_clip_by_asset(conn: &Connection, asset_id: i64) -> Result<Option<Clip
                 timestamp_source: row.get(17)?,
                 source_folder: row.get(18)?,
                 created_at: row.get(19)?,
+                camera_profile_type: row.get(20)?,
+                camera_profile_ref: row.get(21)?,
+                camera_device_uuid: row.get(22)?,
             })
         },
     ).optional()?;
@@ -334,7 +354,8 @@ pub fn list_clips(conn: &Connection, library_id: i64, limit: i64, offset: i64) -
         "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                 duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                 audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                timestamp_source, source_folder, created_at
+                timestamp_source, source_folder, created_at,
+                camera_profile_type, camera_profile_ref, camera_device_uuid
          FROM clips WHERE library_id = ?1
          ORDER BY recorded_at DESC, created_at DESC
          LIMIT ?2 OFFSET ?3"
@@ -362,6 +383,9 @@ pub fn list_clips(conn: &Connection, library_id: i64, limit: i64, offset: i64) -
             timestamp_source: row.get(17)?,
             source_folder: row.get(18)?,
             created_at: row.get(19)?,
+            camera_profile_type: row.get(20)?,
+            camera_profile_ref: row.get(21)?,
+            camera_device_uuid: row.get(22)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -833,6 +857,22 @@ pub fn update_clip_camera_profile(conn: &Connection, clip_id: i64, camera_profil
     Ok(())
 }
 
+/// Update stable camera references on a clip (Migration 7 / L6 columns).
+pub fn update_clip_camera_refs(
+    conn: &Connection,
+    clip_id: i64,
+    profile_type: Option<&str>,
+    profile_ref: Option<&str>,
+    device_uuid: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE clips SET camera_profile_type = ?1, camera_profile_ref = ?2, camera_device_uuid = ?3
+         WHERE id = ?4",
+        params![profile_type, profile_ref, device_uuid, clip_id],
+    )?;
+    Ok(())
+}
+
 // ----- Events (Phase 6) -----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1072,7 +1112,8 @@ pub fn get_event_clips(conn: &Connection, event_id: i64, limit: i64, offset: i64
                 "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                         duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                         audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                        timestamp_source, source_folder, created_at
+                        timestamp_source, source_folder, created_at,
+                        camera_profile_type, camera_profile_ref, camera_device_uuid
                  FROM clips
                  WHERE id IN (SELECT clip_id FROM event_clips WHERE event_id = ?1)
                     OR (library_id = ?2 AND date(recorded_at) >= date(?3) AND date(recorded_at) <= date(?4))
@@ -1092,7 +1133,8 @@ pub fn get_event_clips(conn: &Connection, event_id: i64, limit: i64, offset: i64
         "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                 duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                 audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                timestamp_source, source_folder, created_at
+                timestamp_source, source_folder, created_at,
+                camera_profile_type, camera_profile_ref, camera_device_uuid
          FROM clips
          WHERE id IN (SELECT clip_id FROM event_clips WHERE event_id = ?1)
          ORDER BY recorded_at DESC, created_at DESC
@@ -1128,6 +1170,9 @@ fn map_clip(row: &rusqlite::Row) -> rusqlite::Result<Clip> {
         timestamp_source: row.get(17)?,
         source_folder: row.get(18)?,
         created_at: row.get(19)?,
+        camera_profile_type: row.get(20)?,
+        camera_profile_ref: row.get(21)?,
+        camera_device_uuid: row.get(22)?,
     })
 }
 
@@ -1154,7 +1199,8 @@ pub fn get_clips_by_date(conn: &Connection, library_id: i64, date: &str, limit: 
         "SELECT id, library_id, original_asset_id, camera_profile_id, media_type, title,
                 duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                 audio_sample_rate, recorded_at, recorded_at_offset_minutes, recorded_at_is_estimated,
-                timestamp_source, source_folder, created_at
+                timestamp_source, source_folder, created_at,
+                camera_profile_type, camera_profile_ref, camera_device_uuid
          FROM clips
          WHERE library_id = ?1 AND date(recorded_at) = date(?2)
          ORDER BY recorded_at DESC
@@ -1175,4 +1221,281 @@ pub fn count_clips_by_date(conn: &Connection, library_id: i64, date: &str) -> Re
         |row| row.get(0),
     )?;
     Ok(count)
+}
+
+// ---------------------------------------------------------------------------
+// VHS Edit Recipes (Migration 8 / L7 -- deterministic recipe definitions)
+// ---------------------------------------------------------------------------
+
+/// A VHS edit recipe stored in Library DB
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VhsEdit {
+    pub id: i64,
+    pub edit_uuid: String,
+    pub name: String,
+    pub pipeline_version: i32,
+    pub created_at: String,
+    pub recipe_hash: String,
+    pub input_clip_ids: String,
+    pub title_text: String,
+    pub title_offset_seconds: i32,
+    pub audio_blend_params: String,
+    pub transform_overrides: String,
+    pub output_relpath: Option<String>,
+    pub output_hash: Option<String>,
+}
+
+/// Parameters for creating a VHS edit recipe
+pub struct NewVhsEdit {
+    pub name: String,
+    pub pipeline_version: i32,
+    pub input_clip_ids: Vec<i64>,
+    pub title_text: String,
+    pub title_offset_seconds: i32,
+    pub audio_blend_params: serde_json::Value,
+    pub transform_overrides: serde_json::Value,
+}
+
+/// Compute the canonical recipe hash (BLAKE3 of canonical JSON bytes).
+/// Canonical JSON: stable key ordering, arrays preserve order, no whitespace.
+fn compute_recipe_hash(edit: &NewVhsEdit) -> String {
+    use std::collections::BTreeMap;
+
+    let mut canonical = BTreeMap::new();
+    canonical.insert("audio_blend_params", serde_json::to_value(&edit.audio_blend_params).unwrap());
+    canonical.insert("input_clip_ids", serde_json::to_value(&edit.input_clip_ids).unwrap());
+    canonical.insert("pipeline_version", serde_json::to_value(edit.pipeline_version).unwrap());
+    canonical.insert("title_offset_seconds", serde_json::to_value(edit.title_offset_seconds).unwrap());
+    canonical.insert("title_text", serde_json::to_value(&edit.title_text).unwrap());
+    canonical.insert("transform_overrides", serde_json::to_value(&edit.transform_overrides).unwrap());
+
+    let canonical_json = serde_json::to_string(&canonical).unwrap();
+    let hash = blake3::hash(canonical_json.as_bytes());
+    hash.to_hex().to_string()
+}
+
+/// Insert a VHS edit recipe. Computes recipe_hash from canonical inputs.
+pub fn insert_vhs_edit(conn: &Connection, edit: &NewVhsEdit) -> Result<VhsEdit> {
+    let edit_uuid = uuid::Uuid::new_v4().to_string();
+    let recipe_hash = compute_recipe_hash(edit);
+    let clip_ids_json = serde_json::to_string(&edit.input_clip_ids)?;
+    let audio_json = serde_json::to_string(&edit.audio_blend_params)?;
+    let transform_json = serde_json::to_string(&edit.transform_overrides)?;
+
+    conn.execute(
+        "INSERT INTO vhs_edits (edit_uuid, name, pipeline_version, recipe_hash, input_clip_ids,
+         title_text, title_offset_seconds, audio_blend_params, transform_overrides)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            edit_uuid, edit.name, edit.pipeline_version, recipe_hash,
+            clip_ids_json, edit.title_text, edit.title_offset_seconds,
+            audio_json, transform_json,
+        ],
+    )?;
+
+    let id = conn.last_insert_rowid();
+    let created_at: String = conn.query_row(
+        "SELECT created_at FROM vhs_edits WHERE id = ?1", [id], |row| row.get(0),
+    )?;
+
+    Ok(VhsEdit {
+        id,
+        edit_uuid,
+        name: edit.name.clone(),
+        pipeline_version: edit.pipeline_version,
+        created_at,
+        recipe_hash,
+        input_clip_ids: clip_ids_json,
+        title_text: edit.title_text.clone(),
+        title_offset_seconds: edit.title_offset_seconds,
+        audio_blend_params: audio_json,
+        transform_overrides: transform_json,
+        output_relpath: None,
+        output_hash: None,
+    })
+}
+
+/// Get a VHS edit by UUID.
+pub fn get_vhs_edit(conn: &Connection, edit_uuid: &str) -> Result<Option<VhsEdit>> {
+    use rusqlite::OptionalExtension;
+    let result = conn.query_row(
+        "SELECT id, edit_uuid, name, pipeline_version, created_at, recipe_hash,
+                input_clip_ids, title_text, title_offset_seconds,
+                audio_blend_params, transform_overrides, output_relpath, output_hash
+         FROM vhs_edits WHERE edit_uuid = ?1",
+        [edit_uuid],
+        |row| {
+            Ok(VhsEdit {
+                id: row.get(0)?,
+                edit_uuid: row.get(1)?,
+                name: row.get(2)?,
+                pipeline_version: row.get(3)?,
+                created_at: row.get(4)?,
+                recipe_hash: row.get(5)?,
+                input_clip_ids: row.get(6)?,
+                title_text: row.get(7)?,
+                title_offset_seconds: row.get(8)?,
+                audio_blend_params: row.get(9)?,
+                transform_overrides: row.get(10)?,
+                output_relpath: row.get(11)?,
+                output_hash: row.get(12)?,
+            })
+        },
+    ).optional()?;
+    Ok(result)
+}
+
+/// Update the output fields of a VHS edit after a build.
+pub fn update_vhs_edit_output(conn: &Connection, edit_uuid: &str, output_relpath: &str, output_hash: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE vhs_edits SET output_relpath = ?1, output_hash = ?2 WHERE edit_uuid = ?3",
+        params![output_relpath, output_hash, edit_uuid],
+    )?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_vhs_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(r#"
+            CREATE TABLE vhs_edits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                edit_uuid TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                pipeline_version INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                recipe_hash TEXT NOT NULL,
+                input_clip_ids TEXT NOT NULL,
+                title_text TEXT NOT NULL DEFAULT '',
+                title_offset_seconds INTEGER NOT NULL DEFAULT 5,
+                audio_blend_params TEXT NOT NULL,
+                transform_overrides TEXT NOT NULL,
+                output_relpath TEXT,
+                output_hash TEXT
+            );
+        "#).unwrap();
+        conn
+    }
+
+    // Spec 9.5: Creating recipe stores canonical recipe_hash
+    #[test]
+    fn test_vhs_recipe_stores_canonical_hash() {
+        let conn = setup_vhs_db();
+
+        let edit = NewVhsEdit {
+            name: "Birthday 2024".to_string(),
+            pipeline_version: 1,
+            input_clip_ids: vec![1, 2, 3],
+            title_text: "Birthday Party".to_string(),
+            title_offset_seconds: 5,
+            audio_blend_params: serde_json::json!({"crossfade": 0.5}),
+            transform_overrides: serde_json::json!({}),
+        };
+
+        let result = insert_vhs_edit(&conn, &edit).unwrap();
+        assert!(!result.recipe_hash.is_empty(), "recipe_hash should be computed");
+        assert!(!result.edit_uuid.is_empty(), "edit_uuid should be generated");
+
+        // Retrieve and verify
+        let stored = get_vhs_edit(&conn, &result.edit_uuid).unwrap().unwrap();
+        assert_eq!(stored.recipe_hash, result.recipe_hash);
+        assert_eq!(stored.name, "Birthday 2024");
+        assert_eq!(stored.input_clip_ids, "[1,2,3]");
+    }
+
+    // Spec 9.5: Same inputs yield same recipe_hash (deterministic)
+    #[test]
+    fn test_vhs_recipe_hash_deterministic() {
+        let conn = setup_vhs_db();
+
+        let make_edit = || NewVhsEdit {
+            name: "Test Edit".to_string(),
+            pipeline_version: 1,
+            input_clip_ids: vec![10, 20, 30],
+            title_text: "Test Title".to_string(),
+            title_offset_seconds: 5,
+            audio_blend_params: serde_json::json!({"volume": 0.8}),
+            transform_overrides: serde_json::json!({"crop": {"top": 10}}),
+        };
+
+        let edit1 = insert_vhs_edit(&conn, &make_edit()).unwrap();
+        let edit2 = insert_vhs_edit(&conn, &make_edit()).unwrap();
+
+        // Same inputs must produce same recipe_hash
+        assert_eq!(edit1.recipe_hash, edit2.recipe_hash,
+            "Identical inputs must produce identical recipe_hash");
+
+        // But different edit_uuids (unique per insert)
+        assert_ne!(edit1.edit_uuid, edit2.edit_uuid);
+    }
+
+    // Spec 9.5: Changing inputs mutates recipe_hash (formulas don't mutate stored recipes)
+    #[test]
+    fn test_vhs_changing_inputs_changes_hash() {
+        let conn = setup_vhs_db();
+
+        let edit_a = NewVhsEdit {
+            name: "Edit A".to_string(),
+            pipeline_version: 1,
+            input_clip_ids: vec![1, 2, 3],
+            title_text: "Title A".to_string(),
+            title_offset_seconds: 5,
+            audio_blend_params: serde_json::json!({}),
+            transform_overrides: serde_json::json!({}),
+        };
+
+        let edit_b = NewVhsEdit {
+            name: "Edit B".to_string(),
+            pipeline_version: 1,
+            input_clip_ids: vec![1, 2, 4], // different clip list
+            title_text: "Title A".to_string(),
+            title_offset_seconds: 5,
+            audio_blend_params: serde_json::json!({}),
+            transform_overrides: serde_json::json!({}),
+        };
+
+        let result_a = insert_vhs_edit(&conn, &edit_a).unwrap();
+        let result_b = insert_vhs_edit(&conn, &edit_b).unwrap();
+
+        // Different inputs must produce different recipe_hash
+        assert_ne!(result_a.recipe_hash, result_b.recipe_hash,
+            "Different inputs must produce different recipe_hash");
+
+        // Original recipe is unchanged (stored recipes are immutable)
+        let stored_a = get_vhs_edit(&conn, &result_a.edit_uuid).unwrap().unwrap();
+        assert_eq!(stored_a.recipe_hash, result_a.recipe_hash,
+            "Stored recipe should not be mutated by subsequent inserts");
+        assert_eq!(stored_a.input_clip_ids, "[1,2,3]");
+    }
+
+    // Spec 9.5: Output hash stored after build
+    #[test]
+    fn test_vhs_output_hash_update() {
+        let conn = setup_vhs_db();
+
+        let edit = NewVhsEdit {
+            name: "Output Test".to_string(),
+            pipeline_version: 1,
+            input_clip_ids: vec![1],
+            title_text: "".to_string(),
+            title_offset_seconds: 5,
+            audio_blend_params: serde_json::json!({}),
+            transform_overrides: serde_json::json!({}),
+        };
+
+        let result = insert_vhs_edit(&conn, &edit).unwrap();
+        assert!(result.output_relpath.is_none());
+        assert!(result.output_hash.is_none());
+
+        // Simulate build completing
+        update_vhs_edit_output(&conn, &result.edit_uuid, ".dadcam/exports/out.mp4", "abc123hash").unwrap();
+
+        let stored = get_vhs_edit(&conn, &result.edit_uuid).unwrap().unwrap();
+        assert_eq!(stored.output_relpath, Some(".dadcam/exports/out.mp4".to_string()));
+        assert_eq!(stored.output_hash, Some("abc123hash".to_string()));
+    }
 }

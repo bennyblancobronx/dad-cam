@@ -71,10 +71,9 @@ pub struct BestClipEntry {
 /// Get score for a specific clip
 #[tauri::command]
 pub fn get_clip_score(state: State<DbState>, clip_id: i64) -> Result<Option<ClipScoreResponse>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let score = scoring::analyzer::get_clip_score(conn, clip_id)
+    let score = scoring::analyzer::get_clip_score(&conn, clip_id)
         .map_err(|e| e.to_string())?;
 
     let Some(score) = score else {
@@ -172,8 +171,7 @@ pub fn score_clip(state: State<DbState>, library_path: String, clip_id: i64, for
 /// Get scoring status for the library
 #[tauri::command]
 pub fn get_scoring_status(state: State<DbState>) -> Result<ScoringStatusResponse, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get library ID from first library (single library mode)
     let library_id: i64 = conn.query_row(
@@ -182,7 +180,7 @@ pub fn get_scoring_status(state: State<DbState>) -> Result<ScoringStatusResponse
         |row| row.get(0),
     ).map_err(|e| e.to_string())?;
 
-    let total_clips = schema::count_clips(conn, library_id)
+    let total_clips = schema::count_clips(&conn, library_id)
         .map_err(|e| e.to_string())?;
 
     let scored_clips: i64 = conn.query_row(
@@ -219,8 +217,7 @@ pub fn get_scoring_status(state: State<DbState>) -> Result<ScoringStatusResponse
 /// Get best clips above threshold
 #[tauri::command]
 pub fn get_best_clips(state: State<DbState>, query: BestClipsQuery) -> Result<Vec<BestClipEntry>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     let threshold = query.threshold.unwrap_or(constants::BEST_CLIPS_THRESHOLD);
     let limit = query.limit.unwrap_or(20);
@@ -232,12 +229,12 @@ pub fn get_best_clips(state: State<DbState>, query: BestClipsQuery) -> Result<Ve
         |row| row.get(0),
     ).map_err(|e| e.to_string())?;
 
-    let best = scoring::analyzer::get_best_clips(conn, library_id, threshold, limit)
+    let best = scoring::analyzer::get_best_clips(&conn, library_id, threshold, limit)
         .map_err(|e| e.to_string())?;
 
     let mut result = Vec::new();
     for (clip_id, effective_score) in best {
-        if let Some(clip) = schema::get_clip(conn, clip_id).map_err(|e| e.to_string())? {
+        if let Some(clip) = schema::get_clip(&conn, clip_id).map_err(|e| e.to_string())? {
             // Get thumb path
             let thumb_path: Option<String> = conn.query_row(
                 "SELECT a.path FROM assets a
@@ -266,11 +263,10 @@ pub fn set_score_override(state: State<DbState>, request: ScoreOverrideRequest) 
     let clip_id = request.clip_id;
 
     {
-        let db = state.0.lock().map_err(|e| e.to_string())?;
-        let conn = db.as_ref().ok_or("No library open")?;
+        let conn = state.connect()?;
 
         // Verify clip exists
-        let _clip = schema::get_clip(conn, clip_id)
+        let _clip = schema::get_clip(&conn, clip_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Clip {} not found", clip_id))?;
 
@@ -334,8 +330,7 @@ pub fn set_score_override(state: State<DbState>, request: ScoreOverrideRequest) 
 /// Clear a score override for a clip
 #[tauri::command]
 pub fn clear_score_override(state: State<DbState>, clip_id: i64) -> Result<bool, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     let deleted = conn.execute(
         "DELETE FROM clip_score_overrides WHERE clip_id = ?1",
@@ -348,8 +343,7 @@ pub fn clear_score_override(state: State<DbState>, clip_id: i64) -> Result<bool,
 /// Queue scoring jobs for all clips needing scores
 #[tauri::command]
 pub fn queue_scoring_jobs(state: State<DbState>) -> Result<i64, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get library ID
     let library_id: i64 = conn.query_row(
@@ -358,12 +352,12 @@ pub fn queue_scoring_jobs(state: State<DbState>) -> Result<i64, String> {
         |row| row.get(0),
     ).map_err(|e| e.to_string())?;
 
-    let clips_needing_scores = scoring::analyzer::get_clips_needing_scores(conn, library_id, 1000)
+    let clips_needing_scores = scoring::analyzer::get_clips_needing_scores(&conn, library_id, 1000)
         .map_err(|e| e.to_string())?;
 
     let mut queued = 0;
     for clip_id in clips_needing_scores {
-        schema::insert_job(conn, &schema::NewJob {
+        schema::insert_job(&conn, &schema::NewJob {
             job_type: "score".to_string(),
             library_id: Some(library_id),
             clip_id: Some(clip_id),

@@ -45,6 +45,10 @@ pub struct CameraMatchSnapshot {
     pub profile_id: Option<i64>,
     pub confidence: f64,
     pub reason: String,
+    // Stable camera refs (spec Group 5: new sidecar format)
+    pub profile_type: Option<String>,
+    pub profile_ref: Option<String>,
+    pub device_uuid: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

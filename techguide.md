@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.104
+Version: 0.1.123
 
 ---
 
@@ -69,6 +69,62 @@ my-library/
 ```
 
 Reference mode: originals stay in their original location, only .dadcam/ is created.
+
+---
+
+Dual Database Architecture (Library Fix)
+
+Dad Cam uses two SQLite databases with distinct responsibilities.
+See docs/planning/libraryfix.md for the full spec.
+See contracts.md #19-22 for the architectural contracts.
+
+App DB (`~/.dadcam/app.db`):
+- User-global. Survives library deletion/moves.
+- Tables:
+  - bundled_profiles: Shipped camera profiles (slug = stable ID)
+  - user_profiles: User-created profiles (uuid = stable ID)
+  - camera_devices: Registered physical cameras (uuid, USB fingerprints, serial, profile assignment)
+  - libraries: Library registry (UUID, path, label, last_opened, pinned, missing)
+  - app_settings: KV table for all app settings (ui_mode, features, theme, title offset, etc.)
+  - profile_staging: Dev menu staging area for profile authoring
+  - entitlements: Optional license persistence
+- Initialized once at startup via ensure_app_db_initialized()
+- Migrations: A1 (camera tables), A2 (libraries + settings + upgrade support), A3 (entitlements)
+
+Library DB (`<library>/.dadcam/dadcam.db`):
+- Project-local. Portable with library folder.
+- Tables: clips, events, event_clips, clip_scores, clip_score_overrides, export_history, vhs_edits, library_meta, plus asset/job tables
+- library_meta stores library_uuid (source of truth for library identity)
+- Initialized on library open/create via ensure_library_db_initialized()
+- Migrations: L0 (library_meta), L6 (stable camera refs on clips), L7 (VHS recipes)
+
+Connection pattern (contract #22):
+- No long-lived connections stored in Tauri State
+- DbState stores path only (Mutex<Option<PathBuf>>)
+- Each command opens short-lived connections via open_app_db_connection() or DbState::connect()
+- Background workers open their own connections
+
+Stable camera references (contract #20):
+- Clips reference cameras via {camera_profile_type, camera_profile_ref, camera_device_uuid}
+- profile_type: 'bundled' | 'user' | 'none'
+- profile_ref: slug (bundled) or uuid (user)
+- No name-based or integer FK references
+
+Library UUID identity (contract #21):
+- Library identified by UUID stored in library_meta table
+- On open: read UUID from library DB, generate if missing
+- App DB registry keyed by library_uuid
+- Relink validates UUID matches before updating path
+
+Bundled profiles sync:
+- Source: resources/cameras/bundled_profiles.json
+- sync_bundled_profiles() does full replace at startup (idempotent)
+- Bundled profiles matched by slug, user profiles by uuid
+
+Legacy migrations (one-time at startup):
+- Tauri Store settings -> App DB KV (tauri_store_migrated flag)
+- ~/.dadcam/custom_cameras.json -> App DB camera_devices (renamed to .migrated)
+- L6 backfill: legacy integer camera IDs -> stable refs in clip rows
 
 ---
 
@@ -461,10 +517,13 @@ Frontend Stack:
 - LRU cache for thumbnail memory management
 
 Tauri Command Layer:
-- DbState: Shared SQLite connection in Mutex
+- DbState: Stores library path in Mutex<Option<PathBuf>> (not a connection -- see contract #22)
+- Each command opens short-lived connections via DbState::connect()
 - Commands: open_library, close_library, get_clips, get_clip, toggle_tag, set_tag
 - Phase 7 Commands: validate_reference_path, create_reference_library, create_batch_ingest, get_batch_progress, start_relink_scan, get_relink_candidates, apply_relink_candidate, get_offline_clips, list_codec_presets, create_codec_preset, get_clip_volume_info
 - Phase 8 Commands: get_ml_analysis, analyze_clip_ml, get_ml_analysis_status, record_clip_view, train_personalized_scoring, get_best_clips_ml
+- Library Fix Commands: list_bundled_profiles, list_user_profiles, create_user_profile, update_user_profile, delete_user_profile, list_camera_devices, register_camera_device, match_camera, import_camera_db, export_camera_db, stage_profile, list_staged, validate_staged, publish_staged, discard_staged, list_registry_libraries
+- Settings Commands (App DB): get_app_settings, save_app_settings, get_mode, set_mode, add_recent_library, remove_recent_library, get_recent_libraries, validate_library_path
 - All responses use camelCase (serde rename_all)
 
 Key Components:
@@ -660,29 +719,30 @@ See docs/planning/phase-8.md for implementation details.
 
 App Modes and Settings (Phase 9)
 
-Two user modes with persistent settings (v2 schema, Tauri Store).
+Two user modes with persistent settings stored in App DB KV table (app_settings).
 
 Modes:
 - Simple: Single project, auto-open last project, light theme only, no feature toggles
 - Advanced: Multi-project dashboard, full feature toggles, theme toggle, dev menu
 
-Settings v2 schema (Tauri Store JSON, not SQLite):
-- version: 2
-- mode: "simple" | "advanced"
-- firstRunCompleted: boolean
+Settings storage (App DB app_settings KV table):
+- ui_mode: "simple" | "advanced"
+- features: JSON map (screenGrabs, faceDetection, bestClips, camerasTab)
+- title_card_offset_seconds: "5"
+- simple_default_library_uuid: UUID or ""
 - theme: "light" | "dark"
-- defaultProjectPath: string | null
-- recentProjects: array of { path, name, lastOpened, clipCount, thumbnailPath }
-- featureFlags: { screenGrabs, faceDetection, bestClips, camerasTab }
-- devMenu: { titleStartSeconds, jlBlendMs, scoreWeights, watermarkText }
-- licenseStateCache: { licenseType, isActive, daysRemaining } | null
+- firstRunCompleted: "true" | "false"
+- dev_menu: JSON (titleStartSeconds, jlBlendMs, scoreWeights, watermarkText)
+- license_state_cache: JSON (licenseType, isActive, daysRemaining) | null
+- tauri_store_migrated: "true" (set after one-time Tauri Store migration)
 
-Migration v1 to v2 (automatic on first load):
-- "personal" -> "simple", "pro" -> "advanced"
-- lastLibraryPath -> defaultProjectPath
-- recentLibraries -> recentProjects
-- firstRunCompleted = true for existing users (skip wizard)
-- Old v1 keys deleted after migration
+Recent projects are derived from the libraries registry table (App DB), not a settings array.
+
+Legacy migration (one-time at startup):
+- Tauri Store v2 settings copied to App DB KV on first launch after upgrade
+- Recent projects resolved to library UUIDs and registered in App DB
+- tauri_store_migrated flag prevents re-migration
+- Old Tauri Store file kept as backup (not deleted)
 
 Theme System:
 - Light mode: default for all users
@@ -830,43 +890,61 @@ Tauri Commands:
 
 ---
 
-Camera System (Phase 9)
+Camera System (Library Fix)
 
-Camera detection and device registration for fleet management.
+Camera profiles and devices live in App DB (survive library deletion).
+Cameras UI works with no library open.
+See docs/planning/libraryfix.md for full spec.
 
-Detection Priority:
-1. Custom device by USB fingerprint: 100% confidence
-2. Custom device by serial number: 95% confidence
-3. Custom device by make + model: 80% confidence
-4. Bundled profile by make + model: 80% confidence
-5. Bundled profile by filename pattern: 70% confidence
-6. Generic fallback: 0% confidence (silent, no prompts)
+Matching Priority (spec 7.2):
+1. Registered device match (USB fingerprint -> device UUID -> assigned profile)
+2. User profile match (match_rules engine)
+3. Bundled profile match (match_rules engine)
+4. Generic fallback (no transform)
 
-Bundled Database:
-- File: resources/cameras/canonical.json
-- Loaded by bundled.rs on startup
-- Currently empty (system works with generic fallback)
+Match Rules (spec 7.3):
+- JSON object: keys are ANDed, arrays within keys are ORed
+- Supported keys: make, model, codec, container, folderPattern (regex), resolution constraints, frameRate, scanType
+- String compares case-insensitive
 
-Device Registration:
-- USB fingerprint capture (macOS: system_profiler -xml, Windows: PowerShell Get-CimInstance, Linux: /sys/bus/usb/devices/)
-- All USB detection wrapped in std::panic::catch_unwind (best-effort, never blocks user)
-- Root hubs filtered out, fingerprints deduplicated
-- Device stored in camera_devices table (Migration 5)
+Tie-break (spec 7.4):
+1. Higher version
+2. Higher specificity score (make+model=5, folderPattern=3, codec+container=3, resolution=2, frameRate=1)
+3. Stable sort by profile_ref (deterministic)
+
+Bundled Profiles:
+- Source: resources/cameras/bundled_profiles.json (shipped with app)
+- App DB table: bundled_profiles (slug = stable ID)
+- sync_bundled_profiles() does full replace at startup (idempotent)
+
+User Profiles:
+- App DB table: user_profiles (uuid = stable ID)
+- CRUD: create/list/get/update/delete
+
+Camera Devices:
+- App DB table: camera_devices (uuid, profile_type, profile_ref, serial_number, fleet_label, usb_fingerprints JSON)
+- USB fingerprint capture: macOS (system_profiler -xml), Windows (PowerShell Get-CimInstance), Linux (/sys/bus/usb/devices/)
+- All USB detection wrapped in catch_unwind (best-effort, never blocks user)
+- Root hubs filtered, fingerprints deduplicated
 - Gated by licensing (camera_registration feature)
 
-Camera Profiles Table (Migration 1):
-- camera_profiles: id, name, version, match_rules (JSON), transform_rules (JSON)
+Stable Clip References:
+- Clips store: camera_profile_type, camera_profile_ref, camera_device_uuid
+- No integer FK references (legacy columns kept but not used for new matching)
+- L6 migration backfills legacy integer IDs to stable refs
 
-Camera Devices Table (Migration 5):
-- camera_devices: id, uuid, profile_id, serial_number, fleet_label, usb_fingerprints (JSON), rental_notes
-- clips.camera_device_id: Foreign key added to clips table
+Profile Staging (Dev Menu):
+- profile_staging table in App DB for authoring workflow
+- Stage, validate, publish, discard cycle
+- Must pass tests before publish
 
 Tauri Commands:
-- list_camera_profiles: All profiles
-- list_camera_devices: All registered devices
-- register_camera_device: Capture USB + save device
-- match_camera: Match a clip to a profile/device
+- list_bundled_profiles / list_user_profiles: Profile listing
+- create_user_profile / update_user_profile / delete_user_profile: User profile CRUD
+- list_camera_devices / register_camera_device: Device management
+- match_camera: Match clip against App DB profiles (spec 7.2 priority)
 - import_camera_db / export_camera_db: JSON import/export
+- stage_profile / list_staged / validate_staged / publish_staged / discard_staged: Staging workflow
 
 ---
 

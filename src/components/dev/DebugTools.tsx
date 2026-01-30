@@ -23,6 +23,7 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
   const [sqlInput, setSqlInput] = useState('');
   const [sqlResult, setSqlResult] = useState<string | null>(null);
   const [clipIdInput, setClipIdInput] = useState('');
+  const [sqlTarget, setSqlTarget] = useState<'library' | 'app'>('library');
 
   // Log viewer state
   const [logs, setLogs] = useState<string[]>([]);
@@ -118,7 +119,7 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
   const handleRunSql = async () => {
     if (!sqlInput.trim()) return;
     try {
-      const result = await invoke<string>('execute_raw_sql', { sql: sqlInput });
+      const result = await invoke<string>('execute_raw_sql', { sql: sqlInput, target: sqlTarget });
       setSqlResult(result);
     } catch (err) {
       setSqlResult(typeof err === 'string' ? err : 'Query failed');
@@ -228,11 +229,36 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
       {/* Raw SQL */}
       <div className="devmenu-form-group">
         <label className="devmenu-label">Raw SQL (Dev license only)</label>
+        <div className="devmenu-inline" style={{ marginBottom: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="sqlTarget"
+              value="library"
+              checked={sqlTarget === 'library'}
+              onChange={() => setSqlTarget('library')}
+            />
+            Library DB
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="sqlTarget"
+              value="app"
+              checked={sqlTarget === 'app'}
+              onChange={() => setSqlTarget('app')}
+            />
+            App DB
+          </label>
+        </div>
         <textarea
           className="devmenu-textarea"
           value={sqlInput}
           onChange={(e) => setSqlInput(e.target.value)}
-          placeholder="SELECT * FROM clips LIMIT 10"
+          placeholder={sqlTarget === 'app'
+            ? "SELECT * FROM app_settings LIMIT 10"
+            : "SELECT * FROM clips LIMIT 10"
+          }
           rows={3}
         />
         <button

@@ -4,6 +4,173 @@ This is the source of truth for version number.
 
 ---
 
+0.1.123 -- Library Fix spec complete, docs sync
+
+- libraryfix.md (docs/planning/libraryfix.md) fully written: App DB + Portable Library DB long-term spec
+- Updated techguide.md to 0.1.123: added App DB architecture, dual-DB model, library registry, stable camera refs, settings in App DB KV, bundled profiles sync
+- Updated contracts.md to v1.1: added 4 new contracts (App DB, stable identity, library identity, short-lived connections)
+- All doc versions now match implementation state (0.1.106-0.1.122 changelog entries cover full implementation)
+
+0.1.122 -- Phase 8 audit: wire ensure_library_db_initialized into open/create commands
+
+- open_library and create_library now call ensure_library_db_initialized() instead of open_db() + manual UUID
+- This ensures L6 backfill (stable camera refs) runs on every library open, not just theoretical code paths
+- Previously ensure_library_db_initialized existed (added in 0.1.113) but was never called from the command layer
+- Full section 8 audit: all Groups 0-7 confirmed 100% complete, no other gaps found
+- All 71 tests pass
+
+0.1.121 -- Phase 7: Dev Menu tooling complete
+
+- Raw SQL tool now has App DB / Library DB target selector (radio buttons in Debug section)
+- Frontend passes target param to execute_raw_sql backend command
+- Added Profile Authoring (staging) UI to Camera DB section in Dev Menu
+- Staging UI supports: stage new or edit existing profile, validate, publish, discard
+- All backend staging commands were already wired (stage, list, validate, publish, discard)
+- All 19 app_db + app_schema tests pass
+
+0.1.120 -- match_camera command now uses App DB directly (no legacy Library DB matcher)
+
+- Rewrote match_camera Tauri command to match against App DB profiles directly instead of calling the legacy Library DB matcher and name-mapping results back
+- Matching now follows spec 7.2 priority: registered device (serial) > user profiles > bundled profiles > fallback
+- Uses the same score_match_rules engine (spec 7.3/7.4) that the ingest pipeline uses for stable refs
+- Made ingest matching functions pub(crate): match_app_profile_rules, match_bundled_profile_rules, score_match_rules
+- Legacy Library DB matcher (camera::matcher) only remains in use by ingest pipeline for backward-compat integer column population
+- No frontend changes needed -- command signature and return type unchanged
+
+0.1.119 -- Phase 6 audit fix: settings moved from Tauri Store to App DB
+
+- Rewrote all settings commands (get/save/mode/recents) to read/write App DB app_settings KV table instead of Tauri Store (spec section 6.3)
+- get_app_settings now reconstructs AppSettings from App DB: ui_mode, features, theme, dev_menu, license_state_cache, default library UUID resolved to path
+- Recent projects now derived exclusively from libraries registry table (App DB), not Tauri Store recentProjects array
+- save_app_settings decomposes into individual KV writes: mode, features, theme, dev_menu, title offset, license cache
+- add_recent_library upserts into App DB registry with UUID-based identity
+- remove_recent_library deletes from App DB registry, handles default library reassignment
+- Removed Tauri Store fallback from LibraryDashboard -- registry is now sole source for recent projects
+- Tauri Store migration (lib.rs) still runs once at startup for upgrading users, store plugin kept for that
+- All 71 tests pass, zero compilation errors
+
+0.1.118 -- Phase 6: Frontend wiring complete
+
+- Added list_registry_libraries Tauri command (enriches App DB entries with clip count + thumbnail)
+- Added RegistryLibraryEntry type (TS) and listRegistryLibraries API function
+- LibraryDashboard now prefers App DB registry for recent projects, falls back to Tauri Store
+- Cameras button on dashboard works without library open (Phase 6 requirement)
+- App.tsx wired: CamerasView renders standalone from dashboard in Advanced mode
+- CamerasView accepts optional onBack prop for dashboard navigation
+- Fixed refreshRegistry callback ordering (defined before use in handleOpenLibrary)
+- All 4 Phase 6 checklist items verified: profileType/profileRef, cameras without library, registry UI, mode/toggles
+
+0.1.117 -- Add 2 spec 9.2 test gaps from Phase 5 audit
+
+- test_deleting_library_preserves_app_data: verifies profiles, devices, settings survive library removal
+- test_recents_persist_across_sessions: verifies library registry entries survive connection close/reopen
+
+0.1.116 -- Phase 5 audit: library clip schema + ingest confirmed complete
+
+- Audited all Phase 5 (Library clip schema + ingest) items from libraryfix.md spec
+- Clip/NewClip structs: stable camera refs (profile_type, profile_ref, device_uuid) present
+- All clip queries (insert, get, list, events, date-grouped) include stable ref columns
+- Ingest worker: opens App DB connection, runs matcher priority chain (device > user > bundled > legacy > fallback), writes stable refs to clip
+- Fix: Added stable camera refs (profile_type, profile_ref, device_uuid) to sidecar CameraMatchSnapshot -- was only writing legacy integer IDs
+- Matcher tie-break implemented per spec 7.4: version > specificity > profile_ref ascending
+- All 69 Rust tests pass
+
+0.1.115 -- Phase 4 audit: cameras in App DB confirmed complete, fix bundled resource bundling
+
+- Audited all Phase 4 (Cameras in App DB) items from libraryfix.md spec
+- Bundled profiles: sync_bundled_profiles() does full replace, idempotent, called at startup, tested
+- User profiles CRUD: create/list/get/update/delete with stable UUID, Tauri commands wired
+- Devices CRUD: create/list/get/find-by-USB/find-by-serial, upsert for migration, Tauri commands wired
+- Legacy JSON import: reads ~/.dadcam/custom_cameras.json, upserts into App DB, renames to .migrated
+- Fix: Added bundle.resources to tauri.conf.json so bundled_profiles.json ships in production builds
+- All 69 Rust tests pass
+
+0.1.114 -- Fix 6 audit issues: frontend types, staging workflow, upgrade/evidence/VHS tests
+
+- Fix 1+6: Rewrote src/types/cameras.ts to use stable profileType/profileRef refs matching Rust backend serde output; updated CamerasView, CameraDbManager, LeftNav to use composite keys and correct field names
+- Fix 2: Added Migration A3 (profile_staging table) to App DB; added stage/list/validate/publish/discard functions in app_schema.rs; added 5 staging commands in devmenu.rs; registered in lib.rs
+- Fix 3: Added test_upgrade_user_profiles_uuid_backfill test (spec 9.1) -- simulates pre-uuid table, ALTERs, backfills, verifies uniqueness
+- Fix 4: Added test_profile_quality_gate_evidence_matching test (spec 9.4) -- evidence JSON with AND/OR semantics, regex folderPattern, positive/negative/near-miss assertions
+- Fix 5: Added VHS recipe CRUD (insert/get/update) + compute_recipe_hash (BLAKE3 of BTreeMap canonical JSON) + 4 determinism tests (spec 9.5)
+- All 75 Rust tests pass
+
+0.1.113 -- Phase 1/2 audit fixes: L7 migration + backfill placement
+
+- Added Migration 8 (vhs_edits table) per spec 5.2 L7 -- deterministic recipe definitions for VHS export
+- Moved backfill_stable_camera_refs call from open_library command into ensure_library_db_initialized per spec contract, so all code paths that initialize a library DB run backfill
+- Removed duplicate backfill call from commands/library.rs
+
+0.1.112 -- DbState stores path not connection (Spec 3.4)
+
+- Changed DbState from Mutex<Option<Connection>> to Mutex<Option<PathBuf>>
+- Each command now opens a short-lived connection via DbState::connect()
+- connect() delegates to open_library_db_connection() (pragmas only, no migrations)
+- Removes long-lived connection from Tauri State per spec 3.4 recommendation
+
+0.1.111 -- Matcher specificity weights + deterministic tie-break (Spec 7.3, 7.4, Appendix A)
+
+- score_match_rules now uses Appendix A weighted specificity: +5 make+model, +3 folderPattern, +3 codec+container, +2 resolution, +1 frameRate
+- Added frameRate matching with +/- 0.01 tolerance (Spec Appendix A)
+- Added resolution constraint matching: minWidth, maxWidth, minHeight, maxHeight (Spec Appendix A)
+- Tie-break order is now spec-compliant: (1) higher version, (2) higher specificity score, (3) profile_ref ascending for determinism (Spec 7.4)
+- 60 tests pass, 0 failures
+
+0.1.110 -- Library Fix audit fixes: busy_timeout, App DB matcher priority, tests (Spec 3.4, 7.2, 9.3, 9.4)
+
+- Added PRAGMA busy_timeout=5000 to open_db() (was missing on main Library DB path)
+- Rewired ingest stable ref resolution to use App DB priority order: device > user > bundled > fallback (Spec 7.2)
+- New score_match_rules engine evaluates App DB match_rules JSON with AND/OR semantics (Spec 7.3)
+- New test: test_concurrent_db_operations (8 threads, parallel reads+writes, no deadlock) (Spec 9.3)
+- New test: test_bundled_profile_quality_gate (positive+negative match validation) (Spec 9.4)
+- New test: test_bundled_sync_idempotent (Spec 9.2)
+- 60 tests pass, 0 failures
+
+0.1.109 -- Library Fix: L6 backfill + Tauri Store migration (Spec 6.2, 6.3)
+
+- L6 backfill: on library open, populate camera_profile_type/ref/device_uuid from legacy integer IDs
+- Bundled profile names resolve to slug, unknown names create [Migrated] user profiles in App DB
+- Legacy camera_device_id resolved to device UUID, device upserted into App DB
+- Tauri Store one-time migration: copies ui_mode, features, title offset, recent projects, theme to App DB
+- Recent projects resolved to library UUIDs and registered in App DB library registry
+- Migration skipped if tauri_store_migrated=true already set (idempotent)
+- New test: test_backfill_stable_camera_refs (verifies bundled match, migrated user profile, device resolve)
+- 57 tests pass, 0 failures
+
+0.1.108 -- Library Fix Phase 2: Cameras in App DB, stable clip refs, typed settings (Groups 3-7)
+
+- Typed settings helpers: ui_mode, features, title_offset, simple_default_library_uuid
+- Bundled camera profiles: sync from bundled_profiles.json to App DB at startup
+- User camera profiles CRUD: create/list/get/update/delete with UUID identity
+- Camera devices CRUD: create/list/get/find-by-USB/find-by-serial with profile_type/profile_ref
+- Legacy ~/.dadcam/custom_cameras.json one-time migration to App DB
+- Migration 7 (L6): clips gain camera_profile_type, camera_profile_ref, camera_device_uuid columns
+- Ingest writes stable camera refs (slug or uuid) instead of integer FK
+- Camera commands rewritten to use App DB directly (work without library open)
+- Dev menu raw SQL accepts target parameter ("app" for App DB, default Library DB)
+- Clip struct reads new columns from all query paths (get_clip, list_clips, events, preview)
+- 56 tests pass, 0 failures
+
+0.1.107 -- relink_library now validates UUID matches target library before updating path
+
+- relink_library opens library DB at new_path, confirms stored UUID matches expected UUID
+- Rejects with clear error on UUID mismatch or missing library_meta
+- New test: test_relink_rejects_uuid_mismatch
+- 56 tests pass, 0 failures
+
+0.1.106 -- Library Fix Phase 1: App DB + Library UUID + Registry (Groups 0-2)
+
+- New App DB (~/.dadcam/app.db) with two migrations: A1 (bundled_profiles, user_profiles, camera_devices) and A2 (libraries registry, app_settings KV)
+- App DB auto-initializes at startup (ensure_app_db_initialized in lib.rs)
+- New library_meta table (Migration 6) in Library DB for portable library identity
+- get_or_create_library_uuid: generates UUID v4 on first open, persists in Library DB
+- Library registry: upsert, mark_opened, mark_seen, mark_missing, list_recent, relink
+- App settings KV: get/set/delete for app_settings table
+- open_library and create_library now generate library UUID and register in App DB
+- LibraryResponse includes libraryUuid field for frontend
+- open_app_db_connection() for short-lived connections (no migration)
+- open_library_db_connection() for short-lived library reads (no migration)
+- 7 new tests (all pass, 55 total pass, 0 failures)
+
 0.1.105 -- Fix 3 failing scoring tests, sync tauri.conf.json version
 
 - audio.rs: Fix ebur128 true peak regex (match "Peak:" not "True peak:")

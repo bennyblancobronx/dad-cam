@@ -1,0 +1,38 @@
+[
+  {
+    "slug": "sony-handycam-avchd",
+    "name": "Sony Handycam (AVCHD)",
+    "version": 1,
+    "matchRules": {
+      "make": ["Sony"],
+      "codec": ["h264"],
+      "folderPattern": "AVCHD|BDMV"
+    },
+    "transformRules": {
+      "deinterlace": true,
+      "deinterlaceMode": "yadif"
+    }
+  },
+  {
+    "slug": "canon-dslr",
+    "name": "Canon DSLR",
+    "version": 1,
+    "matchRules": {
+      "make": ["Canon"],
+      "codec": ["h264"]
+    },
+    "transformRules": {}
+  },
+  {
+    "slug": "panasonic-minidv",
+    "name": "Panasonic MiniDV",
+    "version": 1,
+    "matchRules": {
+      "make": ["Panasonic"],
+      "codec": ["dvvideo", "dv"]
+    },
+    "transformRules": {
+      "deinterlace": true
+    }
+  }
+]

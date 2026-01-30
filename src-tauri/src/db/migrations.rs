@@ -317,6 +317,53 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_camera_devices_uuid ON camera_devices(uuid);
     CREATE INDEX idx_clips_camera_device ON clips(camera_device_id);
     "#,
+
+    // Migration 6: Library identity metadata (L0 from libraryfix.md)
+    // KV table for portable library metadata. Source of truth for library_uuid.
+    r#"
+    CREATE TABLE IF NOT EXISTS library_meta (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL
+    );
+    "#,
+
+    // Migration 7: Stable camera references on clips (L6 from libraryfix.md)
+    // Adds profile_type/profile_ref/device_uuid instead of integer FKs.
+    // Old camera_profile_id and camera_device_id columns are kept (never drop).
+    r#"
+    ALTER TABLE clips ADD COLUMN camera_profile_type TEXT;
+    ALTER TABLE clips ADD COLUMN camera_profile_ref TEXT;
+    ALTER TABLE clips ADD COLUMN camera_device_uuid TEXT;
+
+    CREATE INDEX IF NOT EXISTS idx_clips_camera_profile_ref
+        ON clips(camera_profile_type, camera_profile_ref);
+    CREATE INDEX IF NOT EXISTS idx_clips_camera_device_uuid
+        ON clips(camera_device_uuid);
+    "#,
+
+    // Migration 8: VHS deterministic recipe definitions (L7 from libraryfix.md)
+    // Stores rebuildable recipe definitions. Coexists with export_history (Migration 4)
+    // which stores execution logs. vhs_edits.edit_uuid can be referenced by export_history.
+    r#"
+    CREATE TABLE IF NOT EXISTS vhs_edits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        edit_uuid TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        pipeline_version INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+
+        recipe_hash TEXT NOT NULL,
+        input_clip_ids TEXT NOT NULL,
+        title_text TEXT NOT NULL DEFAULT '',
+        title_offset_seconds INTEGER NOT NULL DEFAULT 5,
+        audio_blend_params TEXT NOT NULL,
+        transform_overrides TEXT NOT NULL,
+
+        output_relpath TEXT,
+        output_hash TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_vhs_edits_created_at ON vhs_edits(created_at);
+    "#,
 ];
 
 /// Get current schema version from database

@@ -129,11 +129,10 @@ pub fn create_event(
     color: Option<String>,
     icon: Option<String>,
 ) -> Result<EventView, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get current library
-    let lib = get_current_library(conn)?;
+    let lib = get_current_library(&conn)?;
 
     // Validate event type
     if event_type != "date_range" && event_type != "clip_selection" {
@@ -158,44 +157,42 @@ pub fn create_event(
         icon,
     };
 
-    let event_id = schema::insert_event(conn, &new_event)
+    let event_id = schema::insert_event(&conn, &new_event)
         .map_err(|e| e.to_string())?;
 
-    let event = schema::get_event(conn, event_id)
+    let event = schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or("Failed to retrieve created event")?;
 
-    event_to_view(conn, event)
+    event_to_view(&conn, event)
 }
 
 /// Get all events for the current library
 #[tauri::command]
 pub fn get_events(state: State<DbState>) -> Result<Vec<EventView>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let lib = get_current_library(conn)?;
+    let lib = get_current_library(&conn)?;
 
-    let events = schema::list_events(conn, lib.id)
+    let events = schema::list_events(&conn, lib.id)
         .map_err(|e| e.to_string())?;
 
     events
         .into_iter()
-        .map(|e| event_to_view(conn, e))
+        .map(|e| event_to_view(&conn, e))
         .collect()
 }
 
 /// Get a single event by ID
 #[tauri::command]
 pub fn get_event(state: State<DbState>, event_id: i64) -> Result<EventView, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let event = schema::get_event(conn, event_id)
+    let event = schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or("Event not found")?;
 
-    event_to_view(conn, event)
+    event_to_view(&conn, event)
 }
 
 /// Update an event
@@ -210,8 +207,7 @@ pub fn update_event(
     color: Option<String>,
     icon: Option<String>,
 ) -> Result<EventView, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     let updates = EventUpdate {
         name,
@@ -222,28 +218,27 @@ pub fn update_event(
         icon,
     };
 
-    schema::update_event(conn, event_id, &updates)
+    schema::update_event(&conn, event_id, &updates)
         .map_err(|e| e.to_string())?;
 
-    let event = schema::get_event(conn, event_id)
+    let event = schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or("Event not found after update")?;
 
-    event_to_view(conn, event)
+    event_to_view(&conn, event)
 }
 
 /// Delete an event
 #[tauri::command]
 pub fn delete_event(state: State<DbState>, event_id: i64) -> Result<(), String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Verify event exists before deleting
-    schema::get_event(conn, event_id)
+    schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Event {} not found", event_id))?;
 
-    schema::delete_event(conn, event_id)
+    schema::delete_event(&conn, event_id)
         .map_err(|e| e.to_string())?;
 
     Ok(())
@@ -256,17 +251,16 @@ pub fn add_clips_to_event(
     event_id: i64,
     clip_ids: Vec<i64>,
 ) -> Result<(), String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Validate event exists
-    let event = schema::get_event(conn, event_id)
+    let event = schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Event {} not found", event_id))?;
 
     // Validate clips exist and belong to same library
     for clip_id in &clip_ids {
-        let clip = schema::get_clip(conn, *clip_id)
+        let clip = schema::get_clip(&conn, *clip_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Clip {} not found", clip_id))?;
 
@@ -275,7 +269,7 @@ pub fn add_clips_to_event(
         }
     }
 
-    schema::add_clips_to_event(conn, event_id, &clip_ids)
+    schema::add_clips_to_event(&conn, event_id, &clip_ids)
         .map_err(|e| e.to_string())?;
 
     Ok(())
@@ -288,15 +282,14 @@ pub fn remove_clips_from_event(
     event_id: i64,
     clip_ids: Vec<i64>,
 ) -> Result<(), String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Validate event exists
-    schema::get_event(conn, event_id)
+    schema::get_event(&conn, event_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Event {} not found", event_id))?;
 
-    schema::remove_clips_from_event(conn, event_id, &clip_ids)
+    schema::remove_clips_from_event(&conn, event_id, &clip_ids)
         .map_err(|e| e.to_string())?;
 
     Ok(())
@@ -310,20 +303,19 @@ pub fn get_event_clips(
     offset: i64,
     limit: i64,
 ) -> Result<EventClipsResponse, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let lib = get_current_library(conn)?;
+    let lib = get_current_library(&conn)?;
 
-    let total = schema::get_event_clip_count(conn, event_id)
+    let total = schema::get_event_clip_count(&conn, event_id)
         .map_err(|e| e.to_string())?;
 
-    let clips = schema::get_event_clips(conn, event_id, limit, offset)
+    let clips = schema::get_event_clips(&conn, event_id, limit, offset)
         .map_err(|e| e.to_string())?;
 
     let clip_views: Vec<EventClipView> = clips
         .into_iter()
-        .map(|c| clip_to_view(conn, c, &lib.root_path))
+        .map(|c| clip_to_view(&conn, c, &lib.root_path))
         .collect();
 
     Ok(EventClipsResponse {
@@ -337,12 +329,11 @@ pub fn get_event_clips(
 /// Get clips grouped by date (for date navigation)
 #[tauri::command]
 pub fn get_clips_grouped_by_date(state: State<DbState>) -> Result<Vec<DateGroup>, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let lib = get_current_library(conn)?;
+    let lib = get_current_library(&conn)?;
 
-    let groups = schema::get_clips_grouped_by_date(conn, lib.id)
+    let groups = schema::get_clips_grouped_by_date(&conn, lib.id)
         .map_err(|e| e.to_string())?;
 
     Ok(groups
@@ -417,20 +408,19 @@ pub fn get_clips_by_date(
     // Validate date format before querying
     validate_date_format(&date)?;
 
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
-    let lib = get_current_library(conn)?;
+    let lib = get_current_library(&conn)?;
 
-    let total = schema::count_clips_by_date(conn, lib.id, &date)
+    let total = schema::count_clips_by_date(&conn, lib.id, &date)
         .map_err(|e| e.to_string())?;
 
-    let clips = schema::get_clips_by_date(conn, lib.id, &date, limit, offset)
+    let clips = schema::get_clips_by_date(&conn, lib.id, &date, limit, offset)
         .map_err(|e| e.to_string())?;
 
     let clip_views: Vec<EventClipView> = clips
         .into_iter()
-        .map(|c| clip_to_view(conn, c, &lib.root_path))
+        .map(|c| clip_to_view(&conn, c, &lib.root_path))
         .collect();
 
     Ok(EventClipsResponse {

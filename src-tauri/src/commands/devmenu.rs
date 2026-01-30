@@ -81,19 +81,10 @@ fn get_tool_version(name: &str, path: &str) -> Option<String> {
 /// Clear proxy, thumbnail, and sprite caches for the open library
 #[tauri::command]
 pub fn clear_caches(state: State<DbState>) -> Result<String, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
-
-    // Get the library root path
-    let library_path: String = conn
-        .query_row(
-            "SELECT root_path FROM libraries LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("Failed to get library path: {}", e))?;
-
-    let root = PathBuf::from(&library_path);
+    let guard = state.0.lock().map_err(|e| e.to_string())?;
+    let library_root = guard.as_ref().ok_or("No library open")?;
+    let root = library_root.clone();
+    drop(guard);
     let dadcam_dir = root.join(constants::DADCAM_FOLDER);
 
     let mut cleared = Vec::new();
@@ -153,8 +144,7 @@ fn clear_directory(dir: &PathBuf) -> Result<(usize, u64), String> {
 /// Export the library database by copying the .db file to an output path
 #[tauri::command]
 pub fn export_database(state: State<DbState>, output_path: String) -> Result<(), String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get the library root path
     let library_path: String = conn
@@ -184,16 +174,24 @@ pub fn export_database(state: State<DbState>, output_path: String) -> Result<(),
     Ok(())
 }
 
-/// Execute raw SQL query (dev license only)
+/// Execute raw SQL query (dev license only).
+/// `target`: "library" (default) or "app" to select which DB to query.
 #[tauri::command]
-pub fn execute_raw_sql(state: State<DbState>, sql: String) -> Result<String, String> {
+pub fn execute_raw_sql(state: State<DbState>, sql: String, target: Option<String>) -> Result<String, String> {
     // Gate behind dev license
     if !licensing::is_allowed("raw_sql") {
         return Err("Raw SQL requires a Dev license".to_string());
     }
 
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let target = target.unwrap_or_else(|| "library".to_string());
+
+    // Open the appropriate connection (short-lived per spec 3.4)
+    let conn: rusqlite::Connection = if target == "app" {
+        crate::db::app_db::open_app_db_connection()
+            .map_err(|e| format!("Failed to open App DB: {}", e))?
+    } else {
+        state.connect()?
+    };
 
     let sql = sql.trim();
 
@@ -251,8 +249,7 @@ pub fn generate_rental_keys(count: u32) -> Result<Vec<String>, String> {
 /// Export full exiftool JSON dump for a clip to an output path
 #[tauri::command]
 pub fn export_exif_dump(state: State<DbState>, clip_id: i64, output_path: String) -> Result<(), String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     // Get the clip's relative path and the library root
     let (rel_path, library_path): (String, String) = conn
@@ -289,11 +286,62 @@ pub fn export_exif_dump(state: State<DbState>, clip_id: i64, output_path: String
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Profile staging (spec 3.6 -- authoring writes to staging before publish)
+// ---------------------------------------------------------------------------
+
+/// Stage a profile edit for validation before publishing.
+#[tauri::command]
+pub fn stage_profile_edit(
+    source_type: String,
+    source_ref: String,
+    name: String,
+    match_rules: String,
+    transform_rules: String,
+) -> Result<crate::db::app_schema::StagedProfile, String> {
+    if !licensing::is_allowed("raw_sql") {
+        return Err("Staging requires a Dev license".to_string());
+    }
+    let conn = crate::db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    crate::db::app_schema::stage_profile_edit(&conn, &source_type, &source_ref, &name, &match_rules, &transform_rules)
+        .map_err(|e| e.to_string())
+}
+
+/// List all staged profile edits.
+#[tauri::command]
+pub fn list_staged_profiles() -> Result<Vec<crate::db::app_schema::StagedProfile>, String> {
+    let conn = crate::db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    crate::db::app_schema::list_staged_profiles(&conn).map_err(|e| e.to_string())
+}
+
+/// Validate all staged profiles. Returns error descriptions for failures.
+#[tauri::command]
+pub fn validate_staged_profiles() -> Result<Vec<(i64, String)>, String> {
+    let conn = crate::db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    crate::db::app_schema::validate_staged_profiles(&conn).map_err(|e| e.to_string())
+}
+
+/// Publish all staged profiles (validates first, then applies).
+#[tauri::command]
+pub fn publish_staged_profiles() -> Result<u32, String> {
+    if !licensing::is_allowed("raw_sql") {
+        return Err("Publishing requires a Dev license".to_string());
+    }
+    let conn = crate::db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    crate::db::app_schema::publish_staged_profiles(&conn).map_err(|e| e.to_string())
+}
+
+/// Discard all staged profile edits.
+#[tauri::command]
+pub fn discard_staged_profiles() -> Result<u32, String> {
+    let conn = crate::db::app_db::open_app_db_connection().map_err(|e| e.to_string())?;
+    crate::db::app_schema::discard_staged_profiles(&conn).map_err(|e| e.to_string())
+}
+
 /// Get database statistics
 #[tauri::command]
 pub fn get_db_stats(state: State<DbState>) -> Result<String, String> {
-    let db = state.0.lock().map_err(|e| e.to_string())?;
-    let conn = db.as_ref().ok_or("No library open")?;
+    let conn = state.connect()?;
 
     let mut stats = Vec::new();
 

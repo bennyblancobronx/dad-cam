@@ -17,6 +17,7 @@ use crate::db::schema::{
     update_ingest_file_complete, insert_asset, insert_clip, link_clip_asset, insert_fingerprint,
     find_asset_by_hash, update_job_status, update_job_progress,
     get_or_create_volume, link_asset_volume, update_clip_camera_profile,
+    update_clip_camera_refs,
 };
 use crate::hash::{compute_fast_hash, compute_size_duration_fingerprint};
 use crate::metadata::{extract_metadata, detect_media_type, parse_folder_date};
@@ -327,13 +328,17 @@ fn process_single_file(
         recorded_at_is_estimated: timestamp_source.as_deref() == Some("filesystem"),
         timestamp_source,
         source_folder: source_folder.clone(),
+        // Stable camera refs set after matching below
+        camera_profile_type: None,
+        camera_profile_ref: None,
+        camera_device_uuid: None,
     };
     let clip_id = insert_clip(conn, &clip)?;
 
     // Link clip to asset
     link_clip_asset(conn, clip_id, asset_id, "primary")?;
 
-    // Unified camera matching: device + profile
+    // Unified camera matching: device + profile (legacy Library DB matcher)
     let camera_result = crate::camera::matcher::match_camera(
         conn,
         &metadata,
@@ -342,6 +347,7 @@ fn process_single_file(
     );
     let camera_profile_name = camera_result.profile_name.clone();
     if camera_result.confidence >= crate::constants::CAMERA_MATCH_MIN_CONFIDENCE {
+        // Legacy integer refs (kept for backward compat)
         if let Some(profile_id) = camera_result.profile_id {
             update_clip_camera_profile(conn, clip_id, profile_id)?;
         }
@@ -349,6 +355,24 @@ fn process_single_file(
             crate::camera::devices::update_clip_camera_device(conn, clip_id, device_id)?;
         }
     }
+
+    // Stable camera refs via App DB priority order (spec 7.2):
+    // device > user profile > bundled profile > legacy name > fallback
+    let (stable_type, stable_ref, device_uuid) = resolve_stable_camera_refs(
+        conn,
+        camera_result.profile_id,
+        camera_result.device_id,
+        None, // USB fingerprints not available during file ingest
+        &metadata,
+        source_folder.as_deref(),
+    );
+    update_clip_camera_refs(
+        conn,
+        clip_id,
+        stable_type.as_deref(),
+        stable_ref.as_deref(),
+        device_uuid.as_deref(),
+    )?;
 
     // Create fingerprint for relink
     let fingerprint = compute_size_duration_fingerprint(file_size, metadata.duration_ms);
@@ -390,6 +414,9 @@ fn process_single_file(
             profile_id: camera_result.profile_id,
             confidence: camera_result.confidence,
             reason: camera_result.reason.clone(),
+            profile_type: stable_type.clone(),
+            profile_ref: stable_ref.clone(),
+            device_uuid: device_uuid.clone(),
         },
         ingest_timestamps: sidecar::IngestTimestamps {
             discovered_at,
@@ -504,6 +531,354 @@ fn ingest_sidecar(
     link_clip_asset(conn, clip_id, asset_id, "sidecar")?;
 
     Ok(asset_id)
+}
+
+/// Resolve camera match to stable refs using App DB priority order (spec section 7.2):
+/// 1. Registered device match (USB fingerprint -> device UUID -> assigned profile if set)
+/// 2. User profiles rules engine (match_rules from App DB user_profiles)
+/// 3. Bundled profiles rules engine (match_rules from App DB bundled_profiles)
+/// 4. Generic fallback (none)
+///
+/// Also resolves legacy library-local profile_id by name for backward compat.
+/// Returns (profile_type, profile_ref, device_uuid).
+fn resolve_stable_camera_refs(
+    lib_conn: &Connection,
+    legacy_profile_id: Option<i64>,
+    legacy_device_id: Option<i64>,
+    usb_fingerprints: Option<&[String]>,
+    metadata: &crate::metadata::MediaMetadata,
+    source_folder: Option<&str>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let app_conn = match crate::db::app_db::open_app_db_connection() {
+        Ok(c) => c,
+        Err(_) => return resolve_stable_refs_fallback(lib_conn, legacy_profile_id, legacy_device_id),
+    };
+
+    // Priority 1: Registered device by USB fingerprint
+    if let Some(fps) = usb_fingerprints {
+        for fp in fps {
+            if let Ok(Some(device)) = crate::db::app_schema::find_device_by_usb_fingerprint_app(&app_conn, fp) {
+                if device.profile_type != "none" && !device.profile_ref.is_empty() {
+                    return (
+                        Some(device.profile_type.clone()),
+                        Some(device.profile_ref.clone()),
+                        Some(device.uuid),
+                    );
+                }
+                // Device found but no assigned profile -- continue matching, keep device_uuid
+                let device_uuid = Some(device.uuid.clone());
+                let (ptype, pref) = resolve_profile_from_app_db(
+                    &app_conn, metadata, source_folder, lib_conn, legacy_profile_id,
+                );
+                return (Some(ptype), Some(pref), device_uuid);
+            }
+        }
+    }
+
+    // Priority 1b: Device by serial number
+    if let Some(ref serial) = metadata.serial_number {
+        if let Ok(Some(device)) = crate::db::app_schema::find_device_by_serial_app(&app_conn, serial) {
+            if device.profile_type != "none" && !device.profile_ref.is_empty() {
+                return (
+                    Some(device.profile_type.clone()),
+                    Some(device.profile_ref.clone()),
+                    Some(device.uuid),
+                );
+            }
+            let device_uuid = Some(device.uuid.clone());
+            let (ptype, pref) = resolve_profile_from_app_db(
+                &app_conn, metadata, source_folder, lib_conn, legacy_profile_id,
+            );
+            return (Some(ptype), Some(pref), device_uuid);
+        }
+    }
+
+    // No device match -- resolve profile from App DB, device from legacy
+    let (ptype, pref) = resolve_profile_from_app_db(
+        &app_conn, metadata, source_folder, lib_conn, legacy_profile_id,
+    );
+
+    // Resolve legacy device_id to UUID if available
+    let device_uuid = legacy_device_id.and_then(|did| {
+        lib_conn.query_row(
+            "SELECT uuid FROM camera_devices WHERE id = ?1",
+            [did],
+            |row| row.get::<_, String>(0),
+        ).ok()
+    });
+
+    (Some(ptype), Some(pref), device_uuid)
+}
+
+/// Resolve profile using App DB priority: user profiles > bundled profiles > legacy name > fallback.
+fn resolve_profile_from_app_db(
+    app_conn: &Connection,
+    metadata: &crate::metadata::MediaMetadata,
+    source_folder: Option<&str>,
+    lib_conn: &Connection,
+    legacy_profile_id: Option<i64>,
+) -> (String, String) {
+    // Priority 2: User profiles match_rules
+    if let Ok(user_profiles) = crate::db::app_schema::list_user_profiles(app_conn) {
+        if let Some(matched) = match_app_profile_rules(&user_profiles, metadata, source_folder) {
+            return ("user".to_string(), matched);
+        }
+    }
+
+    // Priority 3: Bundled profiles match_rules
+    if let Ok(bundled) = crate::db::app_schema::list_bundled_profiles(app_conn) {
+        if let Some(matched) = match_bundled_profile_rules(&bundled, metadata, source_folder) {
+            return ("bundled".to_string(), matched);
+        }
+
+        // Fallback: resolve legacy profile_id by name against bundled/user
+        if let Some(pid) = legacy_profile_id {
+            if let Ok(name) = lib_conn.query_row(
+                "SELECT name FROM camera_profiles WHERE id = ?1",
+                [pid],
+                |row| row.get::<_, String>(0),
+            ) {
+                if let Some(bp) = bundled.iter().find(|b| {
+                    b.name.eq_ignore_ascii_case(&name) || b.slug.eq_ignore_ascii_case(&name)
+                }) {
+                    return ("bundled".to_string(), bp.slug.clone());
+                }
+                if let Ok(ups) = crate::db::app_schema::list_user_profiles(app_conn) {
+                    if let Some(up) = ups.iter().find(|u| u.name.eq_ignore_ascii_case(&name)) {
+                        return ("user".to_string(), up.uuid.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 4: Generic fallback
+    ("none".to_string(), String::new())
+}
+
+/// Match metadata against App DB user profiles' match_rules.
+/// Returns the UUID of the best matching user profile, if any.
+/// Tie-break per spec 7.4: (1) higher version, (2) higher specificity, (3) profile_ref ascending.
+pub(crate) fn match_app_profile_rules(
+    profiles: &[crate::db::app_schema::AppUserProfile],
+    metadata: &crate::metadata::MediaMetadata,
+    source_folder: Option<&str>,
+) -> Option<String> {
+    let mut best: Option<(i32, f64, &str)> = None; // (version, score, ref)
+
+    for profile in profiles {
+        let rules: serde_json::Value = serde_json::from_str(&profile.match_rules).unwrap_or_default();
+        let score = score_match_rules(&rules, metadata, source_folder);
+        if score > 0.0 {
+            let is_better = best.map_or(true, |(bv, bs, br)| {
+                profile.version > bv
+                    || (profile.version == bv && score > bs)
+                    || (profile.version == bv && (score - bs).abs() < f64::EPSILON && profile.uuid.as_str() < br)
+            });
+            if is_better {
+                best = Some((profile.version, score, &profile.uuid));
+            }
+        }
+    }
+
+    best.map(|(_, _, uuid)| uuid.to_string())
+}
+
+/// Match metadata against App DB bundled profiles' match_rules.
+/// Returns the slug of the best matching bundled profile, if any.
+/// Tie-break per spec 7.4: (1) higher version, (2) higher specificity, (3) profile_ref ascending.
+pub(crate) fn match_bundled_profile_rules(
+    profiles: &[crate::db::app_schema::AppBundledProfile],
+    metadata: &crate::metadata::MediaMetadata,
+    source_folder: Option<&str>,
+) -> Option<String> {
+    let mut best: Option<(i32, f64, &str)> = None; // (version, score, ref)
+
+    for profile in profiles {
+        let rules: serde_json::Value = serde_json::from_str(&profile.match_rules).unwrap_or_default();
+        let score = score_match_rules(&rules, metadata, source_folder);
+        if score > 0.0 {
+            let is_better = best.map_or(true, |(bv, bs, br)| {
+                profile.version > bv
+                    || (profile.version == bv && score > bs)
+                    || (profile.version == bv && (score - bs).abs() < f64::EPSILON && profile.slug.as_str() < br)
+            });
+            if is_better {
+                best = Some((profile.version, score, &profile.slug));
+            }
+        }
+    }
+
+    best.map(|(_, _, slug)| slug.to_string())
+}
+
+/// Score how well a match_rules JSON object matches the given metadata.
+/// Keys are ANDed; within a key, arrays are ORed; strings are case-insensitive (spec 7.3).
+/// Returns 0.0 if any specified key fails to match.
+/// Score uses Appendix A specificity weights:
+///   +5 make+model, +3 folderPattern, +3 codec+container,
+///   +2 resolution constraints, +1 frameRate
+pub(crate) fn score_match_rules(
+    rules: &serde_json::Value,
+    metadata: &crate::metadata::MediaMetadata,
+    source_folder: Option<&str>,
+) -> f64 {
+    let obj = match rules.as_object() {
+        Some(o) if !o.is_empty() => o,
+        _ => return 0.0,
+    };
+
+    let mut total_keys = 0usize;
+    let mut matched_keys = 0usize;
+    let mut specificity = 0.0f64;
+
+    // make (+5 when combined with model, tracked below)
+    let make_matched = if let Some(makes) = obj.get("make").and_then(|v| v.as_array()) {
+        total_keys += 1;
+        if let Some(ref cam_make) = metadata.camera_make {
+            if makes.iter().any(|m| {
+                m.as_str().map_or(false, |s| cam_make.to_lowercase().contains(&s.to_lowercase()))
+            }) {
+                matched_keys += 1;
+                true
+            } else { false }
+        } else { false }
+    } else { false };
+
+    // model (+5 when combined with make)
+    let model_matched = if let Some(models) = obj.get("model").and_then(|v| v.as_array()) {
+        total_keys += 1;
+        if let Some(ref cam_model) = metadata.camera_model {
+            if models.iter().any(|m| {
+                m.as_str().map_or(false, |s| cam_model.to_lowercase().contains(&s.to_lowercase()))
+            }) {
+                matched_keys += 1;
+                true
+            } else { false }
+        } else { false }
+    } else { false };
+
+    // Award make+model specificity
+    if make_matched && model_matched {
+        specificity += 5.0;
+    } else if make_matched || model_matched {
+        // Partial: make or model alone is less specific
+        specificity += 2.0;
+    }
+
+    // codec (+3 when combined with container, tracked below)
+    let codec_matched = if let Some(codecs) = obj.get("codec").and_then(|v| v.as_array()) {
+        total_keys += 1;
+        if let Some(ref codec) = metadata.codec {
+            if codecs.iter().any(|c| {
+                c.as_str().map_or(false, |s| codec.eq_ignore_ascii_case(s))
+            }) {
+                matched_keys += 1;
+                true
+            } else { false }
+        } else { false }
+    } else { false };
+
+    // container (+3 when combined with codec)
+    let container_matched = if let Some(containers) = obj.get("container").and_then(|v| v.as_array()) {
+        total_keys += 1;
+        if let Some(ref container) = metadata.container {
+            let parts: Vec<&str> = container.split(',').map(|s| s.trim()).collect();
+            if containers.iter().any(|c| {
+                c.as_str().map_or(false, |s| parts.iter().any(|p| p.eq_ignore_ascii_case(s)))
+            }) {
+                matched_keys += 1;
+                true
+            } else { false }
+        } else { false }
+    } else { false };
+
+    // Award codec+container specificity
+    if codec_matched && container_matched {
+        specificity += 3.0;
+    } else if codec_matched || container_matched {
+        specificity += 1.5;
+    }
+
+    // folderPattern (+3)
+    if let Some(pattern) = obj.get("folderPattern").and_then(|v| v.as_str()) {
+        total_keys += 1;
+        if let Some(folder) = source_folder {
+            if let Ok(re) = regex::RegexBuilder::new(pattern).case_insensitive(true).build() {
+                if re.is_match(folder) {
+                    matched_keys += 1;
+                    specificity += 3.0;
+                }
+            }
+        }
+    }
+
+    // Resolution constraints (+2 collectively): minWidth, maxWidth, minHeight, maxHeight
+    let has_resolution_rule = obj.contains_key("minWidth") || obj.contains_key("maxWidth")
+        || obj.contains_key("minHeight") || obj.contains_key("maxHeight");
+    if has_resolution_rule {
+        total_keys += 1;
+        let w = metadata.width.unwrap_or(0);
+        let h = metadata.height.unwrap_or(0);
+        let mut res_ok = true;
+        if let Some(min_w) = obj.get("minWidth").and_then(|v| v.as_i64()) {
+            if (w as i64) < min_w { res_ok = false; }
+        }
+        if let Some(max_w) = obj.get("maxWidth").and_then(|v| v.as_i64()) {
+            if (w as i64) > max_w { res_ok = false; }
+        }
+        if let Some(min_h) = obj.get("minHeight").and_then(|v| v.as_i64()) {
+            if (h as i64) < min_h { res_ok = false; }
+        }
+        if let Some(max_h) = obj.get("maxHeight").and_then(|v| v.as_i64()) {
+            if (h as i64) > max_h { res_ok = false; }
+        }
+        if res_ok {
+            matched_keys += 1;
+            specificity += 2.0;
+        }
+    }
+
+    // frameRate (+1, tolerance +/- 0.01 per spec)
+    if let Some(rates) = obj.get("frameRate").and_then(|v| v.as_array()) {
+        total_keys += 1;
+        if let Some(fps) = metadata.fps {
+            if rates.iter().any(|r| {
+                r.as_f64().map_or(false, |expected| (fps - expected).abs() <= 0.01)
+            }) {
+                matched_keys += 1;
+                specificity += 1.0;
+            }
+        }
+    }
+
+    if total_keys == 0 {
+        return 0.0;
+    }
+
+    // All keys must match (AND semantics per spec 7.3)
+    if matched_keys == total_keys {
+        specificity
+    } else {
+        0.0
+    }
+}
+
+/// Fallback when App DB is unavailable: resolve from legacy library DB refs only.
+fn resolve_stable_refs_fallback(
+    lib_conn: &Connection,
+    legacy_profile_id: Option<i64>,
+    legacy_device_id: Option<i64>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let device_uuid = legacy_device_id.and_then(|did| {
+        lib_conn.query_row(
+            "SELECT uuid FROM camera_devices WHERE id = ?1",
+            [did],
+            |row| row.get::<_, String>(0),
+        ).ok()
+    });
+    let _pid = legacy_profile_id; // Cannot resolve without App DB
+    (Some("none".to_string()), Some(String::new()), device_uuid)
 }
 
 /// Determine timestamp using precedence rules
