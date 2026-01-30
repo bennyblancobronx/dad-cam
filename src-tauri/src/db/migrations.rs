@@ -410,6 +410,17 @@ const MIGRATIONS: &[&str] = &[
     -- Add verified_method to assets
     ALTER TABLE assets ADD COLUMN verified_method TEXT;
     "#,
+
+    // Migration 10: Sidecar gold-standard import (sidecar-importplan.md)
+    // Sidecars become first-class manifest entries with their own rows.
+    r#"
+    ALTER TABLE ingest_manifest_entries ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'media'
+        CHECK (entry_type IN ('media', 'sidecar'));
+    ALTER TABLE ingest_manifest_entries ADD COLUMN parent_entry_id INTEGER
+        REFERENCES ingest_manifest_entries(id);
+    CREATE INDEX idx_manifest_entry_type ON ingest_manifest_entries(entry_type);
+    CREATE INDEX idx_manifest_parent ON ingest_manifest_entries(parent_entry_id);
+    "#,
 ];
 
 /// Get current schema version from database

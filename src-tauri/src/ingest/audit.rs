@@ -42,6 +42,10 @@ struct ManifestExportEntry {
     relative_path: String,
     size_bytes: i64,
     mtime: Option<String>,
+    /// "media" or "sidecar" (sidecar-importplan section 12.6)
+    entry_type: String,
+    /// FK to parent media entry for sidecars; null for media and orphan sidecars
+    parent_entry_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -56,6 +60,10 @@ struct ResultExportEntry {
     error_detail: Option<String>,
     created_at: String,
     updated_at: String,
+    /// "media" or "sidecar" (sidecar-importplan section 12.6)
+    entry_type: String,
+    /// FK to parent media entry for sidecars; null for media and orphan sidecars
+    parent_entry_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +119,8 @@ pub fn export_audit_report(conn: &Connection, session_id: i64, output_dir: &Path
                 relative_path: entry.relative_path.clone(),
                 size_bytes: entry.size_bytes,
                 mtime: entry.mtime.clone(),
+                entry_type: entry.entry_type.clone(),
+                parent_entry_id: entry.parent_entry_id,
             })?;
             writeln!(manifest_file, "{}", line)?;
         }
@@ -131,6 +141,8 @@ pub fn export_audit_report(conn: &Connection, session_id: i64, output_dir: &Path
                 error_detail: entry.error_detail.clone(),
                 created_at: entry.created_at.clone(),
                 updated_at: entry.updated_at.clone(),
+                entry_type: entry.entry_type.clone(),
+                parent_entry_id: entry.parent_entry_id,
             })?;
             writeln!(results_file, "{}", line)?;
         }
@@ -142,7 +154,7 @@ pub fn export_audit_report(conn: &Connection, session_id: i64, output_dir: &Path
     {
         let mut rescan_file = fs::File::create(session_dir.join("rescan.jsonl"))?;
         if source_root.exists() {
-            if let Ok(files) = discover::discover_media_files(source_root) {
+            if let Ok(files) = discover::discover_all_eligible_files(source_root) {
                 for file_path in &files {
                     let relative = file_path
                         .strip_prefix(source_root)

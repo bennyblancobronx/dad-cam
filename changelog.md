@@ -4,6 +4,48 @@ This is the source of truth for version number.
 
 ---
 
+0.1.132 -- Docs sync: sidecar import audit 49/49, techguide updated
+
+- Full audit of sidecar-importplan.md against codebase: 49/49 checklist items confirmed done
+- Techguide updated with Sidecar Import Verification section documenting the full pipeline
+- Techguide version synced from 0.1.128 to 0.1.132
+- tauri.conf.json version synced to 0.1.132
+
+0.1.131 -- Sidecar UX: progress counts, summary, error distinction (sidecar-importplan 12.7)
+
+- IngestResult now tracks sidecar_count and sidecar_failed separately
+- IngestResponse (Rust + TypeScript) includes sidecarCount and sidecarFailed fields
+- Completion message includes sidecar count when sidecars are present
+- ImportDialog summary shows media clips and sidecar counts separately
+- Error display distinguishes media failures from sidecar failures
+- SessionVerificationStatus includes sidecar_total and sidecar_failed counts
+- get_session_verification_status() queries sidecar-specific counts by entry_type
+
+0.1.130 -- Sidecar gold-standard: copy pipeline + rescan + audit (sidecar-importplan 12.4-12.6)
+
+- Sidecar copy pipeline: process_sidecar_entry() follows same gold-standard copy+verify as media files
+- Sidecars get full BLAKE3 hashing, read-back verification, dedup checks, and atomic writes
+- Failed sidecar copy is a hard failure (blocks SAFE TO WIPE), not a warning
+- link_sidecar_to_parent_clip() links sidecar assets to parent media clip via manifest parent_entry_id
+- Orphan sidecars (no matching media stem) are copied and verified but not linked to any clip
+- Rescan gate now uses discover_all_eligible_files() to cover both media and sidecar files
+- Missing/new sidecars on source device block SAFE TO WIPE identically to media files
+- Audit export: ManifestExportEntry and ResultExportEntry now include entry_type and parent_entry_id
+- Audit rescan.jsonl now includes sidecar files (uses discover_all_eligible_files)
+- Legacy ingest_sidecar() function deprecated (kept for backward compat, no longer called)
+
+0.1.129 -- Sidecar gold-standard: Migration 10 + discovery + manifest (sidecar-importplan 12.1-12.3)
+
+- DB Migration 10: adds entry_type (media/sidecar) and parent_entry_id columns to ingest_manifest_entries
+- ManifestEntry + NewManifestEntry structs updated with new fields
+- insert_manifest_entry, get_manifest_entries, get_pending_manifest_entries updated to read/write new columns
+- Query ordering changed from relative_path to id (ensures media entries process before their sidecars)
+- All existing manifest entries default to entry_type='media', parent_entry_id=NULL (backward compat)
+- discover_all_sidecars(): walks source dir, returns paired sidecars (matched to media stem) and orphan sidecars separately
+- discover_all_eligible_files(): returns media + sidecar paths combined (for rescan in 12.5)
+- Manifest building now inserts media entries first, then paired sidecars with parent_entry_id, then orphans
+- manifest_hash now covers all entries (media + sidecars)
+
 0.1.128 -- Wipe workflow + device ejection detection (importplan 29/29)
 
 - Wipe source files command (hard-gated on SAFE TO WIPE, deterministic delete order from manifest)

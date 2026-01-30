@@ -77,6 +77,105 @@ pub fn is_media_file(path: &Path) -> bool {
         || IMAGE_EXTENSIONS.contains(&ext.as_str())
 }
 
+/// Discover all sidecar files in a source directory relative to known media files.
+/// Returns (paired_sidecars, orphan_sidecars):
+///   - paired_sidecars: Vec of (media_path, Vec<sidecar_path>) for sidecars matching a media stem
+///   - orphan_sidecars: Vec of sidecar-extension files with no matching media stem
+pub fn discover_all_sidecars(
+    source_path: &Path,
+    media_files: &[PathBuf],
+) -> (Vec<(PathBuf, Vec<PathBuf>)>, Vec<PathBuf>) {
+    use std::collections::{HashMap, HashSet};
+
+    // Build a set of (parent_dir, lowercase_stem) for all known media files
+    let mut media_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    // Map from (parent_dir, lowercase_stem) -> media_path for pairing
+    let mut stem_to_media: HashMap<(PathBuf, String), PathBuf> = HashMap::new();
+
+    for media_path in media_files {
+        if let (Some(parent), Some(stem)) = (media_path.parent(), media_path.file_stem()) {
+            let key = (parent.to_path_buf(), stem.to_string_lossy().to_lowercase());
+            media_stems.insert(key.clone());
+            stem_to_media.insert(key, media_path.clone());
+        }
+    }
+
+    // Walk source for all sidecar-extension files
+    let mut paired: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    let mut orphans: Vec<PathBuf> = Vec::new();
+
+    let walker = if source_path.is_dir() {
+        WalkDir::new(source_path).follow_links(true)
+    } else {
+        // Single file source -- no sidecars to discover
+        return (Vec::new(), Vec::new());
+    };
+
+    for entry in walker.into_iter().filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if !is_sidecar_file(path) {
+            continue;
+        }
+
+        let parent = match path.parent() {
+            Some(p) => p.to_path_buf(),
+            None => continue,
+        };
+        let stem = match path.file_stem() {
+            Some(s) => s.to_string_lossy().to_lowercase(),
+            None => continue,
+        };
+
+        let key = (parent, stem);
+        if let Some(media_path) = stem_to_media.get(&key) {
+            paired.entry(media_path.clone())
+                .or_default()
+                .push(path.to_path_buf());
+        } else {
+            orphans.push(path.to_path_buf());
+        }
+    }
+
+    // Convert paired map to sorted vec
+    let mut paired_vec: Vec<(PathBuf, Vec<PathBuf>)> = paired.into_iter().collect();
+    paired_vec.sort_by(|a, b| a.0.cmp(&b.0));
+    for (_, sidecars) in &mut paired_vec {
+        sidecars.sort();
+    }
+    orphans.sort();
+
+    (paired_vec, orphans)
+}
+
+/// Discover all eligible files (media + sidecar) in a source directory.
+/// Used by rescan to ensure completeness covers both types.
+pub fn discover_all_eligible_files(source_path: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    if source_path.is_file() {
+        if is_media_file(source_path) || is_sidecar_file(source_path) {
+            files.push(source_path.to_path_buf());
+        }
+    } else if source_path.is_dir() {
+        for entry in WalkDir::new(source_path)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && (is_media_file(path) || is_sidecar_file(path)) {
+                files.push(path.to_path_buf());
+            }
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
+
 /// Check if a file is a sidecar file
 pub fn is_sidecar_file(path: &Path) -> bool {
     let ext = match path.extension().and_then(|e| e.to_str()) {

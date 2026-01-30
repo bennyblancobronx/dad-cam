@@ -24,6 +24,7 @@ use crate::db::schema::{
     update_ingest_session_manifest_hash, update_ingest_session_rescan,
     update_ingest_session_finished,
     NewManifestEntry, insert_manifest_entry, get_manifest_entries,
+    get_pending_manifest_entries,
     update_manifest_entry_result, update_manifest_entry_hash_fast,
     update_asset_hash_full, update_asset_verified_with_method,
 };
@@ -56,6 +57,10 @@ pub struct IngestResult {
     pub clips_created: Vec<i64>,
     pub camera_breakdown: Vec<CameraBreakdown>,
     pub session_id: Option<i64>,
+    /// Number of sidecar files discovered and processed (sidecar-importplan 12.7)
+    pub sidecar_count: usize,
+    /// Number of sidecar files that failed verification (sidecar-importplan 12.7)
+    pub sidecar_failed: usize,
 }
 
 /// Create an ingest job for a source path.
@@ -102,17 +107,12 @@ pub fn create_ingest_job(conn: &Connection, library_id: i64, source_path: &str, 
     };
     let session_id = insert_ingest_session(conn, &session)?;
 
-    // Create manifest entries for each discovered file
+    // Create manifest entries for each discovered file (media + sidecars)
     let source_root = Path::new(source_path);
     let mut manifest_data = Vec::new(); // for computing manifest_hash
 
-    for file_path in &files {
-        let relative_path = file_path
-            .strip_prefix(source_root)
-            .unwrap_or(file_path)
-            .to_string_lossy()
-            .to_string();
-
+    // Helper: stat a file and return (size_bytes, mtime_string)
+    fn stat_for_manifest(file_path: &Path) -> (i64, Option<String>) {
         let meta = std::fs::metadata(file_path).ok();
         let size_bytes = meta.as_ref().map(|m| m.len() as i64).unwrap_or(0);
         let mtime = meta.as_ref()
@@ -121,19 +121,87 @@ pub fn create_ingest_job(conn: &Connection, library_id: i64, source_path: &str, 
                 let dt: chrono::DateTime<chrono::Utc> = t.into();
                 dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
             });
+        (size_bytes, mtime)
+    }
+
+    // Phase 1: Insert media entries (these get lower IDs, processed first)
+    // Track media_path -> manifest_entry_id for sidecar parent linking
+    let mut media_entry_ids: std::collections::HashMap<std::path::PathBuf, i64> = std::collections::HashMap::new();
+
+    for file_path in &files {
+        let relative_path = file_path
+            .strip_prefix(source_root)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+
+        let (size_bytes, mtime) = stat_for_manifest(file_path);
+
+        let entry_id = insert_manifest_entry(conn, &NewManifestEntry {
+            session_id,
+            relative_path: relative_path.clone(),
+            size_bytes,
+            mtime: mtime.clone(),
+            entry_type: "media".to_string(),
+            parent_entry_id: None,
+        })?;
+
+        media_entry_ids.insert(file_path.clone(), entry_id);
+
+        manifest_data.push(format!("{}|{}|{}", relative_path, size_bytes, mtime.as_deref().unwrap_or("")));
+    }
+
+    // Phase 2: Discover sidecars and insert as manifest entries
+    let (paired_sidecars, orphan_sidecars) = discover::discover_all_sidecars(source_root, &files);
+
+    // Insert paired sidecars (linked to parent media entry)
+    for (media_path, sidecar_paths) in &paired_sidecars {
+        let parent_entry_id = media_entry_ids.get(media_path).copied();
+        for sidecar_path in sidecar_paths {
+            let relative_path = sidecar_path
+                .strip_prefix(source_root)
+                .unwrap_or(sidecar_path)
+                .to_string_lossy()
+                .to_string();
+
+            let (size_bytes, mtime) = stat_for_manifest(sidecar_path);
+
+            insert_manifest_entry(conn, &NewManifestEntry {
+                session_id,
+                relative_path: relative_path.clone(),
+                size_bytes,
+                mtime: mtime.clone(),
+                entry_type: "sidecar".to_string(),
+                parent_entry_id,
+            })?;
+
+            manifest_data.push(format!("{}|{}|{}", relative_path, size_bytes, mtime.as_deref().unwrap_or("")));
+        }
+    }
+
+    // Insert orphan sidecars (no parent media)
+    for sidecar_path in &orphan_sidecars {
+        let relative_path = sidecar_path
+            .strip_prefix(source_root)
+            .unwrap_or(sidecar_path)
+            .to_string_lossy()
+            .to_string();
+
+        let (size_bytes, mtime) = stat_for_manifest(sidecar_path);
 
         insert_manifest_entry(conn, &NewManifestEntry {
             session_id,
             relative_path: relative_path.clone(),
             size_bytes,
             mtime: mtime.clone(),
+            entry_type: "sidecar".to_string(),
+            parent_entry_id: None,
         })?;
 
-        // Collect for manifest hash computation (sorted by relative_path)
         manifest_data.push(format!("{}|{}|{}", relative_path, size_bytes, mtime.as_deref().unwrap_or("")));
     }
 
-    // Compute manifest_hash = BLAKE3 of sorted manifest entries
+    // Compute manifest_hash = BLAKE3 of sorted manifest entries (media + sidecars)
     manifest_data.sort();
     let manifest_blob = manifest_data.join("\n");
     let manifest_hash = compute_full_hash_from_bytes(manifest_blob.as_bytes());
@@ -204,6 +272,8 @@ fn run_ingest_job_inner(
         clips_created: Vec::new(),
         camera_breakdown: Vec::new(),
         session_id,
+        sidecar_count: 0,
+        sidecar_failed: 0,
     };
     let mut camera_counts: HashMap<String, usize> = HashMap::new();
 
@@ -316,6 +386,56 @@ fn run_ingest_job_inner(
                 eprintln!("Failed to process {}: {}", source_path.display(), e);
             }
         }
+    }
+
+    // Process sidecar manifest entries (sidecar-importplan section 12.4)
+    // Sidecars are in manifest_entries but not legacy ingest_files table.
+    // Processed after all media files so parent clips exist for linking.
+    if let Some(sid) = session_id {
+        let sidecar_entries: Vec<_> = get_pending_manifest_entries(conn, sid)?
+            .into_iter()
+            .filter(|e| e.entry_type == "sidecar")
+            .collect();
+
+        let sidecar_total = sidecar_entries.len();
+        for (sidx, sidecar_entry) in sidecar_entries.iter().enumerate() {
+            // Check cancel flag
+            if let Some(flag) = cancel_flag {
+                if is_cancelled(flag) {
+                    emit_progress_opt(app, &JobProgress::new(&job_id_str, "cancelled", (sidx) as u64, sidecar_total as u64)
+                        .cancelled()
+                        .with_message("Import cancelled by user"));
+                    update_job_status(conn, job_id, "cancelled")?;
+                    return Ok(result);
+                }
+            }
+
+            // Emit progress
+            emit_progress_opt(app, &JobProgress::new(&job_id_str, "copying_sidecars", (sidx + 1) as u64, sidecar_total as u64)
+                .with_message(format!("Copying sidecar {}/{}", sidx + 1, sidecar_total)));
+
+            match process_sidecar_entry(
+                conn, library_id, sidecar_entry, source_root, &originals_dir, &payload.ingest_mode,
+            ) {
+                Ok(()) => {
+                    result.processed += 1;
+                }
+                Err(e) => {
+                    result.failed += 1;
+                    result.sidecar_failed += 1;
+                    eprintln!("Failed to process sidecar {}: {}", sidecar_entry.relative_path, e);
+                    // Mark manifest entry as failed (blocks SAFE TO WIPE)
+                    let _ = update_manifest_entry_result(
+                        conn, sidecar_entry.id, "failed", None, None,
+                        Some("SIDECAR_COPY_FAILED"),
+                        Some(&e.to_string()),
+                    );
+                }
+            }
+        }
+
+        result.total_files += sidecar_total;
+        result.sidecar_count = sidecar_total;
     }
 
     // Build camera breakdown
@@ -588,13 +708,10 @@ fn process_single_file(
     let fingerprint = compute_size_duration_fingerprint(file_size, metadata.duration_ms);
     insert_fingerprint(conn, clip_id, "size_duration", &fingerprint)?;
 
-    // Discover and ingest sidecars (THM, XML, XMP, SRT, etc.)
-    let sidecars = discover::discover_sidecars(source_path);
-    for sidecar_path in sidecars {
-        if let Err(e) = ingest_sidecar(conn, library_id, clip_id, &sidecar_path, originals_dir, ingest_mode) {
-            eprintln!("Warning: Failed to ingest sidecar {}: {}", sidecar_path.display(), e);
-        }
-    }
+    // NOTE: Sidecar files (THM, XML, XMP, SRT, etc.) are now first-class manifest entries
+    // discovered during manifest building (sidecar-importplan.md 12.3). They are processed
+    // by the main ingest loop via get_pending_manifest_entries(), not here.
+    // The old warning-only discover+ingest_sidecar loop was removed per 12.4.
 
     // Write sidecar JSON to .dadcam/sidecars/
     emit_progress_opt(app, &JobProgress::new(job_id_str, "indexing", current, total)
@@ -673,8 +790,8 @@ pub fn run_rescan(conn: &Connection, session_id: i64, source_root: &Path) -> Res
         .map(|e| (e.relative_path.clone(), e.size_bytes))
         .collect();
 
-    // Re-walk source and build rescan snapshot
-    let rescan_files = discover::discover_media_files(source_root)?;
+    // Re-walk source for ALL eligible files (media + sidecars) per sidecar-importplan 12.5
+    let rescan_files = discover::discover_all_eligible_files(source_root)?;
     let mut rescan_data = Vec::new();
     let mut rescan_set: HashMap<String, i64> = HashMap::new();
 
@@ -858,7 +975,140 @@ fn queue_post_ingest_jobs(
     Ok(())
 }
 
-/// Ingest a sidecar file and link it to a clip
+/// Process a single sidecar manifest entry through the gold-standard pipeline.
+/// Same copy+verify algorithm as media files (sidecar-importplan section 4.2).
+/// Does NOT create clips -- creates sidecar asset and links to parent clip.
+fn process_sidecar_entry(
+    conn: &Connection,
+    library_id: i64,
+    entry: &schema::ManifestEntry,
+    source_root: &Path,
+    originals_dir: &Path,
+    ingest_mode: &str,
+) -> Result<()> {
+    let source_path = source_root.join(&entry.relative_path);
+
+    // Step 1: Re-stat and compare to manifest baseline (change detection)
+    let current_meta = std::fs::metadata(&source_path).map_err(|e| {
+        DadCamError::Ingest(format!(
+            "Sidecar file disappeared: {} ({})", entry.relative_path, e
+        ))
+    })?;
+    let current_size = current_meta.len() as i64;
+    let current_mtime = current_meta.modified().ok().map(|t| {
+        let dt: chrono::DateTime<chrono::Utc> = t.into();
+        dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    });
+
+    if current_size != entry.size_bytes
+        || (entry.mtime.is_some() && current_mtime != entry.mtime)
+    {
+        update_manifest_entry_result(
+            conn, entry.id, "changed", None, None,
+            Some("CHANGED_SINCE_MANIFEST"),
+            Some(&format!("Sidecar changed: manifest={}/{:?} current={}/{:?}",
+                entry.size_bytes, entry.mtime, current_size, current_mtime)),
+        )?;
+        return Err(DadCamError::Ingest(format!(
+            "Sidecar file changed since manifest: {}", entry.relative_path
+        )));
+    }
+
+    // Step 2: Compute fast hash for dedup candidate lookup
+    let hash_fast = compute_fast_hash(&source_path)?;
+    let _ = update_manifest_entry_hash_fast(conn, entry.id, &hash_fast);
+
+    // Step 2b: Check for dedup against existing assets
+    if let Some(existing) = find_asset_by_hash(conn, library_id, &hash_fast)? {
+        if let Some(ref existing_full_hash) = existing.hash_full {
+            let source_full_hash = compute_full_hash(&source_path)?;
+            if source_full_hash == *existing_full_hash {
+                // Dedup verified
+                update_manifest_entry_result(
+                    conn, entry.id, "dedup_verified",
+                    Some(&source_full_hash), Some(existing.id),
+                    None, None,
+                )?;
+                // Still link to parent clip if available
+                link_sidecar_to_parent_clip(conn, entry, existing.id)?;
+                return Ok(());
+            }
+        }
+    }
+
+    // Step 3: Copy with verification (same algorithm as media files)
+    let (dest_path, source_uri, source_hash) = if ingest_mode == "copy" {
+        let (dest, hash) = copy::copy_file_to_library(&source_path, originals_dir)?;
+        (dest.to_string_lossy().to_string(), None, Some(hash))
+    } else {
+        let relative_path = format!("ref:{}", source_path.display());
+        (relative_path, Some(source_path.to_string_lossy().to_string()), None)
+    };
+
+    // Step 4: Create sidecar asset record
+    let asset = NewAsset {
+        library_id,
+        asset_type: "sidecar".to_string(),
+        path: dest_path,
+        source_uri,
+        size_bytes: current_size,
+        hash_fast: Some(hash_fast),
+        hash_fast_scheme: Some(HASH_FAST_SCHEME.to_string()),
+    };
+    let asset_id = insert_asset(conn, &asset)?;
+
+    // Step 5: Store full hash and mark verified
+    if let Some(ref hash) = source_hash {
+        update_asset_hash_full(conn, asset_id, hash)?;
+        update_asset_verified_with_method(conn, asset_id, "copy_readback")?;
+    }
+
+    // Step 6: Update manifest entry
+    update_manifest_entry_result(
+        conn, entry.id, "copied_verified",
+        source_hash.as_deref(), Some(asset_id),
+        None, None,
+    )?;
+
+    // Step 7: Link sidecar asset to parent clip
+    link_sidecar_to_parent_clip(conn, entry, asset_id)?;
+
+    Ok(())
+}
+
+/// Link a sidecar asset to its parent media file's clip.
+/// Uses parent_entry_id -> parent manifest entry -> asset_id -> clip lookup.
+/// Orphan sidecars (parent_entry_id = NULL) are not linked to any clip.
+fn link_sidecar_to_parent_clip(
+    conn: &Connection,
+    sidecar_entry: &schema::ManifestEntry,
+    sidecar_asset_id: i64,
+) -> Result<()> {
+    let parent_id = match sidecar_entry.parent_entry_id {
+        Some(id) => id,
+        None => return Ok(()), // Orphan sidecar, no clip to link
+    };
+
+    // Get parent manifest entry's asset_id
+    let parent_asset_id: Option<i64> = conn.query_row(
+        "SELECT asset_id FROM ingest_manifest_entries WHERE id = ?1",
+        rusqlite::params![parent_id],
+        |row| row.get(0),
+    ).unwrap_or(None);
+
+    if let Some(asset_id) = parent_asset_id {
+        if let Some(clip) = schema::get_clip_by_asset(conn, asset_id)? {
+            link_clip_asset(conn, clip.id, sidecar_asset_id, "sidecar")?;
+        }
+    }
+
+    Ok(())
+}
+
+/// DEPRECATED: Legacy sidecar ingest (pre-sidecar-importplan).
+/// Kept for backward compatibility with pre-Migration-10 sessions.
+/// New sessions use process_sidecar_entry() which follows the gold-standard pipeline.
+#[allow(dead_code)]
 fn ingest_sidecar(
     conn: &Connection,
     library_id: i64,
@@ -1518,6 +1768,8 @@ mod tests {
                 relative_path: relative,
                 size_bytes: meta.len() as i64,
                 mtime: None,
+                entry_type: "media".to_string(),
+                parent_entry_id: None,
             }).unwrap();
         }
 

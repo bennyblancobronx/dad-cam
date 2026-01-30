@@ -28,4 +28,7 @@ export interface IngestResponse {
   failed: number;
   clipsCreated: number[];
   cameraBreakdown: CameraBreakdownEntry[];
+  sessionId: number | null;
+  sidecarCount: number;
+  sidecarFailed: number;
 }

@@ -39,6 +39,8 @@ pub struct IngestResponse {
     pub clips_created: Vec<i64>,
     pub camera_breakdown: Vec<ingest::CameraBreakdown>,
     pub session_id: Option<i64>,
+    pub sidecar_count: usize,
+    pub sidecar_failed: usize,
 }
 
 // Ingest Commands (separate from Phase 3 clip/library/tag commands)
@@ -119,11 +121,19 @@ fn start_ingest(
     }
 
     // Emit completion
-    emit_progress(&app, &JobProgress::new(&job_id_str, "complete", total, total)
-        .with_message(format!(
+    let completion_msg = if result.sidecar_count > 0 {
+        format!(
+            "Import complete: {} processed ({} sidecars), {} skipped, {} failed",
+            result.processed, result.sidecar_count, result.skipped, result.failed
+        )
+    } else {
+        format!(
             "Import complete: {} processed, {} skipped, {} failed",
             result.processed, result.skipped, result.failed
-        )));
+        )
+    };
+    emit_progress(&app, &JobProgress::new(&job_id_str, "complete", total, total)
+        .with_message(completion_msg));
 
     Ok(IngestResponse {
         job_id,
@@ -134,6 +144,8 @@ fn start_ingest(
         clips_created: result.clips_created,
         camera_breakdown: result.camera_breakdown,
         session_id: result.session_id,
+        sidecar_count: result.sidecar_count,
+        sidecar_failed: result.sidecar_failed,
     })
 }
 

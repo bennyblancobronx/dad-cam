@@ -294,13 +294,26 @@ export function ImportDialog({
             ) : result ? (
               <>
                 <div style={{ fontSize: '16px', fontWeight: 600 }}>
-                  {result.processed} clip{result.processed !== 1 ? 's' : ''} imported
+                  {result.processed - (result.sidecarCount - result.sidecarFailed)} clip{(result.processed - (result.sidecarCount - result.sidecarFailed)) !== 1 ? 's' : ''} imported
+                  {result.sidecarCount > 0 && (
+                    <span style={{ fontWeight: 400, fontSize: '14px', color: 'var(--color-text-secondary)' }}>
+                      {' '}+ {result.sidecarCount - result.sidecarFailed} sidecar{(result.sidecarCount - result.sidecarFailed) !== 1 ? 's' : ''}
+                    </span>
+                  )}
                 </div>
                 {(result.skipped > 0 || result.failed > 0) && (
                   <div style={{ fontSize: '14px', color: 'var(--color-text-secondary)' }}>
                     {result.skipped > 0 && <span>{result.skipped} skipped (duplicates)</span>}
                     {result.skipped > 0 && result.failed > 0 && <span> / </span>}
-                    {result.failed > 0 && <span style={{ color: 'var(--color-error)' }}>{result.failed} failed</span>}
+                    {result.failed > 0 && result.sidecarFailed > 0 ? (
+                      <span style={{ color: 'var(--color-error)' }}>
+                        {result.failed - result.sidecarFailed > 0 && <>{result.failed - result.sidecarFailed} media failed</>}
+                        {result.failed - result.sidecarFailed > 0 && result.sidecarFailed > 0 && ', '}
+                        {result.sidecarFailed > 0 && <>{result.sidecarFailed} sidecar{result.sidecarFailed !== 1 ? 's' : ''} failed</>}
+                      </span>
+                    ) : result.failed > 0 ? (
+                      <span style={{ color: 'var(--color-error)' }}>{result.failed} failed</span>
+                    ) : null}
                   </div>
                 )}
 

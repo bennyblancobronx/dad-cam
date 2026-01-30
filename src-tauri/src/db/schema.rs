@@ -1533,6 +1533,10 @@ pub struct ManifestEntry {
     pub error_detail: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// "media" or "sidecar" (Migration 10)
+    pub entry_type: String,
+    /// FK to parent media entry for sidecars; NULL for media and orphan sidecars
+    pub parent_entry_id: Option<i64>,
 }
 
 pub struct NewManifestEntry {
@@ -1540,13 +1544,17 @@ pub struct NewManifestEntry {
     pub relative_path: String,
     pub size_bytes: i64,
     pub mtime: Option<String>,
+    /// "media" or "sidecar" (Migration 10)
+    pub entry_type: String,
+    /// FK to parent media entry for sidecars; None for media and orphan sidecars
+    pub parent_entry_id: Option<i64>,
 }
 
 pub fn insert_manifest_entry(conn: &Connection, entry: &NewManifestEntry) -> Result<i64> {
     conn.execute(
-        "INSERT INTO ingest_manifest_entries (session_id, relative_path, size_bytes, mtime)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![entry.session_id, entry.relative_path, entry.size_bytes, entry.mtime],
+        "INSERT INTO ingest_manifest_entries (session_id, relative_path, size_bytes, mtime, entry_type, parent_entry_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![entry.session_id, entry.relative_path, entry.size_bytes, entry.mtime, entry.entry_type, entry.parent_entry_id],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -1554,9 +1562,10 @@ pub fn insert_manifest_entry(conn: &Connection, entry: &NewManifestEntry) -> Res
 pub fn get_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<ManifestEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, session_id, relative_path, size_bytes, mtime, hash_fast, hash_source_full,
-                asset_id, result, error_code, error_detail, created_at, updated_at
+                asset_id, result, error_code, error_detail, created_at, updated_at,
+                entry_type, parent_entry_id
          FROM ingest_manifest_entries WHERE session_id = ?1
-         ORDER BY relative_path ASC"
+         ORDER BY id ASC"
     )?;
     let entries = stmt.query_map(params![session_id], |row| {
         Ok(ManifestEntry {
@@ -1573,6 +1582,8 @@ pub fn get_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<Ma
             error_detail: row.get(10)?,
             created_at: row.get(11)?,
             updated_at: row.get(12)?,
+            entry_type: row.get(13)?,
+            parent_entry_id: row.get(14)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(entries)
@@ -1581,9 +1592,10 @@ pub fn get_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<Ma
 pub fn get_pending_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<ManifestEntry>> {
     let mut stmt = conn.prepare(
         "SELECT id, session_id, relative_path, size_bytes, mtime, hash_fast, hash_source_full,
-                asset_id, result, error_code, error_detail, created_at, updated_at
+                asset_id, result, error_code, error_detail, created_at, updated_at,
+                entry_type, parent_entry_id
          FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'pending'
-         ORDER BY relative_path ASC"
+         ORDER BY id ASC"
     )?;
     let entries = stmt.query_map(params![session_id], |row| {
         Ok(ManifestEntry {
@@ -1600,6 +1612,8 @@ pub fn get_pending_manifest_entries(conn: &Connection, session_id: i64) -> Resul
             error_detail: row.get(10)?,
             created_at: row.get(11)?,
             updated_at: row.get(12)?,
+            entry_type: row.get(13)?,
+            parent_entry_id: row.get(14)?,
         })
     })?.collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(entries)
@@ -1647,6 +1661,10 @@ pub struct SessionVerificationStatus {
     pub all_verified: bool,
     pub safe_to_wipe: bool,
     pub safe_to_wipe_at: Option<String>,
+    /// Total sidecar entries in this session (sidecar-importplan 12.7)
+    pub sidecar_total: i64,
+    /// Sidecar entries that failed verification
+    pub sidecar_failed: i64,
 }
 
 pub fn get_session_verification_status(conn: &Connection, session_id: i64) -> Result<SessionVerificationStatus> {
@@ -1677,6 +1695,16 @@ pub fn get_session_verification_status(conn: &Connection, session_id: i64) -> Re
 
     let all_verified = total > 0 && (copied_verified + dedup_verified) == total;
 
+    // Sidecar-specific counts (sidecar-importplan 12.7)
+    let sidecar_total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND entry_type = 'sidecar'",
+        params![session_id], |row| row.get(0),
+    )?;
+    let sidecar_failed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND entry_type = 'sidecar' AND result = 'failed'",
+        params![session_id], |row| row.get(0),
+    )?;
+
     let session = get_ingest_session(conn, session_id)?;
     let safe_to_wipe_at = session.as_ref().and_then(|s| s.safe_to_wipe_at.clone());
     let safe_to_wipe = safe_to_wipe_at.is_some();
@@ -1692,6 +1720,8 @@ pub fn get_session_verification_status(conn: &Connection, session_id: i64) -> Re
         all_verified,
         safe_to_wipe,
         safe_to_wipe_at,
+        sidecar_total,
+        sidecar_failed,
     })
 }
 

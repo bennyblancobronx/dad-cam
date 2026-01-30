@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.128
+Version: 0.1.132
 
 ---
 
@@ -1024,10 +1024,72 @@ Audit Artifacts (exported to audit_session_<id>/ directory):
 - wipe_report.json: Per-file wipe outcomes (success/failure)
 
 Tauri Commands:
-- get_session_status: Get session verification status (total, verified, failed, pending, safe_to_wipe)
+- get_session_status: Get session verification status (total, verified, failed, pending, safe_to_wipe, sidecar_total, sidecar_failed)
 - get_session_by_job: Look up session by ingest job ID
 - export_audit_report: Export all audit artifacts to directory
 - wipe_source_files: Execute wipe workflow (hard-gated on safe_to_wipe_at)
+
+---
+
+Sidecar Import Verification (Gold Standard)
+
+Sidecar files (THM, XML, XMP, SRT, LRF, IDX) follow the exact same gold-standard import pipeline as primary media files. Implemented in v0.1.129-0.1.131 per docs/planning/sidecar-importplan.md.
+
+See Contract #7: "Sidecars travel with their parent video."
+
+Database (Migration 10):
+- Two new columns on ingest_manifest_entries:
+  - entry_type: TEXT NOT NULL DEFAULT 'media' CHECK (IN ('media', 'sidecar'))
+  - parent_entry_id: INTEGER REFERENCES ingest_manifest_entries(id) (nullable)
+- Indexes: idx_manifest_entry_type, idx_manifest_parent
+- Backward compat: existing rows get entry_type='media', parent_entry_id=NULL
+
+Discovery:
+- discover_all_sidecars(source_path, media_files): walks source, returns paired sidecars (matched by stem per directory) and orphan sidecars (no matching media stem)
+- discover_all_eligible_files(source_path): returns media + sidecar paths combined (used by rescan)
+- is_sidecar_file(path): checks extension against SIDECAR_EXTENSIONS constant
+
+Manifest Building:
+- Phase 1: Insert media entries (entry_type='media', lower IDs = processed first)
+- Phase 2: Insert paired sidecar entries (entry_type='sidecar', parent_entry_id = media entry ID)
+- Phase 3: Insert orphan sidecar entries (entry_type='sidecar', parent_entry_id = NULL)
+- manifest_hash covers all entries (media + sidecars)
+
+Copy Pipeline (process_sidecar_entry):
+- Same algorithm as media: re-stat > temp copy > stream hash > fsync > read-back hash > compare > atomic rename
+- Creates sidecar asset with type='sidecar', full BLAKE3 hash, verified_method='copy_readback'
+- Dedup: fast hash lookup, full hash verification before accepting dedup
+- Links sidecar asset to parent clip via link_sidecar_to_parent_clip()
+- Failed sidecar = hard failure (blocks SAFE TO WIPE), not a warning
+- Processing order: all media entries first (clip records exist), then sidecar entries
+
+Rescan Gate:
+- Uses discover_all_eligible_files() (media + sidecars combined)
+- Missing or new sidecar on source blocks SAFE TO WIPE identically to media
+- All manifest entries (media AND sidecar) must be copied_verified or dedup_verified
+
+Wipe Workflow:
+- wipe_source_files() iterates ALL manifest entries (no entry_type filter)
+- Sidecar paths included in wipe manifest and wipe_report.json
+
+Audit Artifacts:
+- manifest.jsonl: includes entry_type and parent_entry_id per entry
+- results.jsonl: includes entry_type and parent_entry_id per entry
+- rescan.jsonl: includes sidecar files (via discover_all_eligible_files)
+- rescan_diff.json: diffs cover sidecars (must be empty for SAFE)
+
+UX:
+- Progress: sidecar count included in total, emits separate "copying_sidecars" phase
+- Summary: "X clips imported + Y sidecars" display
+- Errors: distinguishes "X media failed" from "Y sidecars failed"
+- SessionVerificationStatus: includes sidecar_total and sidecar_failed counts
+- IngestResponse: includes sidecarCount and sidecarFailed fields (Rust + TypeScript)
+
+Error Handling:
+- Sidecar read-back failure: marks entry failed, blocks SAFE TO WIPE
+- Sidecar disappeared between manifest and copy: marks entry changed, blocks SAFE TO WIPE
+- Sidecar I/O failure: captures error_code (SIDECAR_COPY_FAILED) + error_detail
+- Parent media success does NOT imply sidecar success (each independent)
 
 ---
 
