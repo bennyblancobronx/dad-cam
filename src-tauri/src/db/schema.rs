@@ -177,6 +177,24 @@ pub fn update_asset_verified(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Set verified_at and verified_method on an asset.
+pub fn update_asset_verified_with_method(conn: &Connection, id: i64, method: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE assets SET verified_at = datetime('now'), verified_method = ?1 WHERE id = ?2",
+        params![method, id],
+    )?;
+    Ok(())
+}
+
+/// Clear verification on an asset (e.g. when secondary verification finds mismatch).
+pub fn clear_asset_verified(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE assets SET verified_at = NULL, verified_method = NULL WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
 // ----- Clip -----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1353,6 +1371,328 @@ pub fn update_vhs_edit_output(conn: &Connection, edit_uuid: &str, output_relpath
         params![output_relpath, output_hash, edit_uuid],
     )?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Ingest Sessions + Manifest Entries (Migration 9 -- gold-standard import)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IngestSession {
+    pub id: i64,
+    pub job_id: i64,
+    pub source_root: String,
+    pub device_serial: Option<String>,
+    pub device_label: Option<String>,
+    pub device_mount_point: Option<String>,
+    pub device_capacity_bytes: Option<i64>,
+    pub status: String,
+    pub manifest_hash: Option<String>,
+    pub rescan_hash: Option<String>,
+    pub safe_to_wipe_at: Option<String>,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+}
+
+pub struct NewIngestSession {
+    pub job_id: i64,
+    pub source_root: String,
+    pub device_serial: Option<String>,
+    pub device_label: Option<String>,
+    pub device_mount_point: Option<String>,
+    pub device_capacity_bytes: Option<i64>,
+}
+
+pub fn insert_ingest_session(conn: &Connection, session: &NewIngestSession) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO ingest_sessions (job_id, source_root, device_serial, device_label, device_mount_point, device_capacity_bytes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            session.job_id,
+            session.source_root,
+            session.device_serial,
+            session.device_label,
+            session.device_mount_point,
+            session.device_capacity_bytes,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_ingest_session(conn: &Connection, id: i64) -> Result<Option<IngestSession>> {
+    let result = conn.query_row(
+        "SELECT id, job_id, source_root, device_serial, device_label, device_mount_point,
+                device_capacity_bytes, status, manifest_hash, rescan_hash, safe_to_wipe_at,
+                started_at, finished_at
+         FROM ingest_sessions WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(IngestSession {
+                id: row.get(0)?,
+                job_id: row.get(1)?,
+                source_root: row.get(2)?,
+                device_serial: row.get(3)?,
+                device_label: row.get(4)?,
+                device_mount_point: row.get(5)?,
+                device_capacity_bytes: row.get(6)?,
+                status: row.get(7)?,
+                manifest_hash: row.get(8)?,
+                rescan_hash: row.get(9)?,
+                safe_to_wipe_at: row.get(10)?,
+                started_at: row.get(11)?,
+                finished_at: row.get(12)?,
+            })
+        },
+    ).optional()?;
+    Ok(result)
+}
+
+pub fn get_ingest_session_by_job(conn: &Connection, job_id: i64) -> Result<Option<IngestSession>> {
+    let result = conn.query_row(
+        "SELECT id, job_id, source_root, device_serial, device_label, device_mount_point,
+                device_capacity_bytes, status, manifest_hash, rescan_hash, safe_to_wipe_at,
+                started_at, finished_at
+         FROM ingest_sessions WHERE job_id = ?1",
+        params![job_id],
+        |row| {
+            Ok(IngestSession {
+                id: row.get(0)?,
+                job_id: row.get(1)?,
+                source_root: row.get(2)?,
+                device_serial: row.get(3)?,
+                device_label: row.get(4)?,
+                device_mount_point: row.get(5)?,
+                device_capacity_bytes: row.get(6)?,
+                status: row.get(7)?,
+                manifest_hash: row.get(8)?,
+                rescan_hash: row.get(9)?,
+                safe_to_wipe_at: row.get(10)?,
+                started_at: row.get(11)?,
+                finished_at: row.get(12)?,
+            })
+        },
+    ).optional()?;
+    Ok(result)
+}
+
+pub fn update_ingest_session_status(conn: &Connection, id: i64, status: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_sessions SET status = ?1 WHERE id = ?2",
+        params![status, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_ingest_session_manifest_hash(conn: &Connection, id: i64, hash: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_sessions SET manifest_hash = ?1 WHERE id = ?2",
+        params![hash, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_ingest_session_rescan(conn: &Connection, id: i64, rescan_hash: &str, safe: bool) -> Result<()> {
+    if safe {
+        conn.execute(
+            "UPDATE ingest_sessions SET rescan_hash = ?1, safe_to_wipe_at = datetime('now') WHERE id = ?2",
+            params![rescan_hash, id],
+        )?;
+    } else {
+        conn.execute(
+            "UPDATE ingest_sessions SET rescan_hash = ?1 WHERE id = ?2",
+            params![rescan_hash, id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn update_ingest_session_finished(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_sessions SET finished_at = datetime('now') WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+// --- Manifest Entries ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManifestEntry {
+    pub id: i64,
+    pub session_id: i64,
+    pub relative_path: String,
+    pub size_bytes: i64,
+    pub mtime: Option<String>,
+    pub hash_fast: Option<String>,
+    pub hash_source_full: Option<String>,
+    pub asset_id: Option<i64>,
+    pub result: String,
+    pub error_code: Option<String>,
+    pub error_detail: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub struct NewManifestEntry {
+    pub session_id: i64,
+    pub relative_path: String,
+    pub size_bytes: i64,
+    pub mtime: Option<String>,
+}
+
+pub fn insert_manifest_entry(conn: &Connection, entry: &NewManifestEntry) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO ingest_manifest_entries (session_id, relative_path, size_bytes, mtime)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![entry.session_id, entry.relative_path, entry.size_bytes, entry.mtime],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn get_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<ManifestEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, relative_path, size_bytes, mtime, hash_fast, hash_source_full,
+                asset_id, result, error_code, error_detail, created_at, updated_at
+         FROM ingest_manifest_entries WHERE session_id = ?1
+         ORDER BY relative_path ASC"
+    )?;
+    let entries = stmt.query_map(params![session_id], |row| {
+        Ok(ManifestEntry {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            relative_path: row.get(2)?,
+            size_bytes: row.get(3)?,
+            mtime: row.get(4)?,
+            hash_fast: row.get(5)?,
+            hash_source_full: row.get(6)?,
+            asset_id: row.get(7)?,
+            result: row.get(8)?,
+            error_code: row.get(9)?,
+            error_detail: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(entries)
+}
+
+pub fn get_pending_manifest_entries(conn: &Connection, session_id: i64) -> Result<Vec<ManifestEntry>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, session_id, relative_path, size_bytes, mtime, hash_fast, hash_source_full,
+                asset_id, result, error_code, error_detail, created_at, updated_at
+         FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'pending'
+         ORDER BY relative_path ASC"
+    )?;
+    let entries = stmt.query_map(params![session_id], |row| {
+        Ok(ManifestEntry {
+            id: row.get(0)?,
+            session_id: row.get(1)?,
+            relative_path: row.get(2)?,
+            size_bytes: row.get(3)?,
+            mtime: row.get(4)?,
+            hash_fast: row.get(5)?,
+            hash_source_full: row.get(6)?,
+            asset_id: row.get(7)?,
+            result: row.get(8)?,
+            error_code: row.get(9)?,
+            error_detail: row.get(10)?,
+            created_at: row.get(11)?,
+            updated_at: row.get(12)?,
+        })
+    })?.collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(entries)
+}
+
+pub fn update_manifest_entry_result(
+    conn: &Connection,
+    id: i64,
+    result: &str,
+    hash_source_full: Option<&str>,
+    asset_id: Option<i64>,
+    error_code: Option<&str>,
+    error_detail: Option<&str>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_manifest_entries
+         SET result = ?1, hash_source_full = ?2, asset_id = ?3,
+             error_code = ?4, error_detail = ?5, updated_at = datetime('now')
+         WHERE id = ?6",
+        params![result, hash_source_full, asset_id, error_code, error_detail, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_manifest_entry_hash_fast(conn: &Connection, id: i64, hash_fast: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE ingest_manifest_entries SET hash_fast = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![hash_fast, id],
+    )?;
+    Ok(())
+}
+
+// --- Session verification roll-up ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionVerificationStatus {
+    pub session_id: i64,
+    pub total_entries: i64,
+    pub copied_verified: i64,
+    pub dedup_verified: i64,
+    pub failed: i64,
+    pub changed: i64,
+    pub pending: i64,
+    pub all_verified: bool,
+    pub safe_to_wipe: bool,
+    pub safe_to_wipe_at: Option<String>,
+}
+
+pub fn get_session_verification_status(conn: &Connection, session_id: i64) -> Result<SessionVerificationStatus> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1",
+        params![session_id], |row| row.get(0),
+    )?;
+    let copied_verified: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'copied_verified'",
+        params![session_id], |row| row.get(0),
+    )?;
+    let dedup_verified: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'dedup_verified'",
+        params![session_id], |row| row.get(0),
+    )?;
+    let failed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'failed'",
+        params![session_id], |row| row.get(0),
+    )?;
+    let changed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND result = 'changed'",
+        params![session_id], |row| row.get(0),
+    )?;
+    let pending: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM ingest_manifest_entries WHERE session_id = ?1 AND result IN ('pending','copying')",
+        params![session_id], |row| row.get(0),
+    )?;
+
+    let all_verified = total > 0 && (copied_verified + dedup_verified) == total;
+
+    let session = get_ingest_session(conn, session_id)?;
+    let safe_to_wipe_at = session.as_ref().and_then(|s| s.safe_to_wipe_at.clone());
+    let safe_to_wipe = safe_to_wipe_at.is_some();
+
+    Ok(SessionVerificationStatus {
+        session_id,
+        total_entries: total,
+        copied_verified,
+        dedup_verified,
+        failed,
+        changed,
+        pending,
+        all_verified,
+        safe_to_wipe,
+        safe_to_wipe_at,
+    })
 }
 
 #[cfg(test)]

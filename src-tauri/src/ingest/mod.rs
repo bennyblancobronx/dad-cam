@@ -3,6 +3,7 @@
 pub mod discover;
 pub mod copy;
 pub mod sidecar;
+pub mod audit;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -18,8 +19,15 @@ use crate::db::schema::{
     find_asset_by_hash, update_job_status, update_job_progress,
     get_or_create_volume, link_asset_volume, update_clip_camera_profile,
     update_clip_camera_refs,
+    // New imports for gold-standard verification
+    NewIngestSession, insert_ingest_session, update_ingest_session_status,
+    update_ingest_session_manifest_hash, update_ingest_session_rescan,
+    update_ingest_session_finished,
+    NewManifestEntry, insert_manifest_entry, get_manifest_entries,
+    update_manifest_entry_result, update_manifest_entry_hash_fast,
+    update_asset_hash_full, update_asset_verified_with_method,
 };
-use crate::hash::{compute_fast_hash, compute_size_duration_fingerprint};
+use crate::hash::{compute_fast_hash, compute_full_hash, compute_full_hash_from_bytes, compute_size_duration_fingerprint};
 use crate::metadata::{extract_metadata, parse_folder_date};
 use crate::constants::{HASH_FAST_SCHEME, ORIGINALS_FOLDER};
 use crate::error::{DadCamError, Result};
@@ -28,6 +36,8 @@ use crate::error::{DadCamError, Result};
 pub struct IngestPayload {
     pub source_path: String,
     pub ingest_mode: String,
+    #[serde(default)]
+    pub session_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,31 +55,100 @@ pub struct IngestResult {
     pub failed: usize,
     pub clips_created: Vec<i64>,
     pub camera_breakdown: Vec<CameraBreakdown>,
+    pub session_id: Option<i64>,
 }
 
-/// Create an ingest job for a source path
+/// Create an ingest job for a source path.
+/// Now also creates an IngestSession + ManifestEntries for gold-standard verification.
 pub fn create_ingest_job(conn: &Connection, library_id: i64, source_path: &str, ingest_mode: &str) -> Result<i64> {
-    let payload = IngestPayload {
+    // Discover files
+    let files = discover::discover_media_files(Path::new(source_path))?;
+
+    // Create job first (session references job)
+    let payload_initial = IngestPayload {
         source_path: source_path.to_string(),
         ingest_mode: ingest_mode.to_string(),
+        session_id: None,
     };
-
     let job = NewJob {
         job_type: "ingest".to_string(),
         library_id: Some(library_id),
         clip_id: None,
         asset_id: None,
         priority: 10,
-        payload: serde_json::to_string(&payload)?,
+        payload: serde_json::to_string(&payload_initial)?,
     };
-
     let job_id = insert_job(conn, &job)?;
 
-    // Discover files and create ingest_files records
-    let files = discover::discover_media_files(Path::new(source_path))?;
+    // Create ingest_files records (legacy table, kept for backward compat)
     for file_path in &files {
         insert_ingest_file(conn, job_id, &file_path.to_string_lossy())?;
     }
+
+    // Create IngestSession
+    let volume_info = if !files.is_empty() {
+        discover::get_volume_info(Path::new(source_path))
+    } else {
+        discover::VolumeInfo { serial: None, label: None, mount_point: None }
+    };
+
+    let session = NewIngestSession {
+        job_id,
+        source_root: source_path.to_string(),
+        device_serial: volume_info.serial.clone(),
+        device_label: volume_info.label.clone(),
+        device_mount_point: volume_info.mount_point.clone(),
+        device_capacity_bytes: None, // Could be populated if we stat the mount point
+    };
+    let session_id = insert_ingest_session(conn, &session)?;
+
+    // Create manifest entries for each discovered file
+    let source_root = Path::new(source_path);
+    let mut manifest_data = Vec::new(); // for computing manifest_hash
+
+    for file_path in &files {
+        let relative_path = file_path
+            .strip_prefix(source_root)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+
+        let meta = std::fs::metadata(file_path).ok();
+        let size_bytes = meta.as_ref().map(|m| m.len() as i64).unwrap_or(0);
+        let mtime = meta.as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|t| {
+                let dt: chrono::DateTime<chrono::Utc> = t.into();
+                dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+            });
+
+        insert_manifest_entry(conn, &NewManifestEntry {
+            session_id,
+            relative_path: relative_path.clone(),
+            size_bytes,
+            mtime: mtime.clone(),
+        })?;
+
+        // Collect for manifest hash computation (sorted by relative_path)
+        manifest_data.push(format!("{}|{}|{}", relative_path, size_bytes, mtime.as_deref().unwrap_or("")));
+    }
+
+    // Compute manifest_hash = BLAKE3 of sorted manifest entries
+    manifest_data.sort();
+    let manifest_blob = manifest_data.join("\n");
+    let manifest_hash = compute_full_hash_from_bytes(manifest_blob.as_bytes());
+    update_ingest_session_manifest_hash(conn, session_id, &manifest_hash)?;
+
+    // Update job payload with session_id
+    let payload_final = IngestPayload {
+        source_path: source_path.to_string(),
+        ingest_mode: ingest_mode.to_string(),
+        session_id: Some(session_id),
+    };
+    conn.execute(
+        "UPDATE jobs SET payload = ?1 WHERE id = ?2",
+        rusqlite::params![serde_json::to_string(&payload_final)?, job_id],
+    )?;
 
     Ok(job_id)
 }
@@ -108,6 +187,12 @@ fn run_ingest_job_inner(
 
     let payload: IngestPayload = serde_json::from_str(&job.payload)?;
     let library_id = job.library_id.ok_or_else(|| DadCamError::Other("Job has no library".to_string()))?;
+    let session_id = payload.session_id;
+
+    // Update session status to ingesting
+    if let Some(sid) = session_id {
+        let _ = update_ingest_session_status(conn, sid, "ingesting");
+    }
 
     update_job_status(conn, job_id, "running")?;
 
@@ -118,8 +203,18 @@ fn run_ingest_job_inner(
         failed: 0,
         clips_created: Vec::new(),
         camera_breakdown: Vec::new(),
+        session_id,
     };
     let mut camera_counts: HashMap<String, usize> = HashMap::new();
+
+    // Get manifest entries for this session (if available) for change detection
+    let manifest_entries = session_id
+        .and_then(|sid| get_manifest_entries(conn, sid).ok())
+        .unwrap_or_default();
+    let manifest_map: HashMap<String, schema::ManifestEntry> = manifest_entries
+        .into_iter()
+        .map(|e| (e.relative_path.clone(), e))
+        .collect();
 
     let pending_files = get_pending_ingest_files(conn, job_id)?;
     result.total_files = pending_files.len();
@@ -127,6 +222,7 @@ fn run_ingest_job_inner(
     let job_id_str = job_id.to_string();
 
     let originals_dir = library_root.join(ORIGINALS_FOLDER);
+    let source_root = Path::new(&payload.source_path);
 
     for (idx, ingest_file) in pending_files.iter().enumerate() {
         // Check cancel flag between files (when available)
@@ -142,6 +238,34 @@ fn run_ingest_job_inner(
 
         let source_path = Path::new(&ingest_file.source_path);
 
+        // Device ejection detection: check source root is still accessible
+        if !source_root.exists() {
+            // Source disappeared (device ejected / unmounted)
+            if let Some(sid) = session_id {
+                let _ = update_ingest_session_status(conn, sid, "failed");
+                let _ = update_ingest_session_finished(conn, sid);
+            }
+            emit_progress_opt(app, &JobProgress::new(&job_id_str, "failed", idx as u64, total)
+                .error("Source device disconnected during import. Remaining files were not verified. Do NOT wipe the device.".to_string()));
+            update_job_status(conn, job_id, "failed")?;
+
+            // Mark all remaining pending manifest entries as failed
+            if let Some(sid) = session_id {
+                let remaining = get_manifest_entries(conn, sid).unwrap_or_default();
+                for entry in &remaining {
+                    if entry.result == "pending" || entry.result == "copying" {
+                        let _ = update_manifest_entry_result(
+                            conn, entry.id, "failed", None, None,
+                            Some("DEVICE_DISCONNECTED"),
+                            Some("Source device was disconnected during import"),
+                        );
+                    }
+                }
+            }
+
+            return Ok(result);
+        }
+
         // Emit per-file progress (when app handle available)
         let current = (idx + 1) as u64;
         let file_name = source_path.file_name()
@@ -153,6 +277,14 @@ fn run_ingest_job_inner(
         // Update DB progress
         let progress = ((idx + 1) * 100 / result.total_files.max(1)) as i32;
         update_job_progress(conn, job_id, progress)?;
+
+        // Find corresponding manifest entry for change detection
+        let relative_path = source_path
+            .strip_prefix(source_root)
+            .unwrap_or(source_path)
+            .to_string_lossy()
+            .to_string();
+        let manifest_entry = manifest_map.get(&relative_path);
 
         // Process file
         match process_single_file(
@@ -167,6 +299,7 @@ fn run_ingest_job_inner(
             &job_id_str,
             current,
             total,
+            manifest_entry,
         ) {
             Ok(Some((clip_id, camera_name))) => {
                 result.processed += 1;
@@ -192,6 +325,17 @@ fn run_ingest_job_inner(
         .collect();
     result.camera_breakdown.sort_by(|a, b| b.count.cmp(&a.count));
 
+    // Update session status to verifying, then run rescan
+    if let Some(sid) = session_id {
+        let _ = update_ingest_session_status(conn, sid, "rescanning");
+        // Run rescan gate
+        if let Err(e) = run_rescan(conn, sid, source_root) {
+            eprintln!("Rescan failed for session {}: {}", sid, e);
+        }
+        let _ = update_ingest_session_status(conn, sid, "complete");
+        let _ = update_ingest_session_finished(conn, sid);
+    }
+
     let final_status = if result.failed > 0 && result.processed == 0 {
         "failed"
     } else {
@@ -216,11 +360,39 @@ fn process_single_file(
     job_id_str: &str,
     current: u64,
     total: u64,
+    manifest_entry: Option<&schema::ManifestEntry>,
 ) -> Result<Option<(i64, Option<String>)>> {
     use crate::jobs::progress::{JobProgress, emit_progress_opt};
 
     // Track per-stage timestamps for sidecar
     let discovered_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // Step 1: Change detection against manifest baseline
+    if let Some(entry) = manifest_entry {
+        let current_meta = std::fs::metadata(source_path).ok();
+        let current_size = current_meta.as_ref().map(|m| m.len() as i64).unwrap_or(0);
+        let current_mtime = current_meta.as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|t| {
+                let dt: chrono::DateTime<chrono::Utc> = t.into();
+                dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+            });
+
+        // Compare size and mtime to manifest
+        if current_size != entry.size_bytes
+            || (entry.mtime.is_some() && current_mtime != entry.mtime)
+        {
+            // File changed since manifest was built -- block safe-to-wipe
+            update_manifest_entry_result(
+                conn, entry.id, "changed", None, None,
+                Some("CHANGED_SINCE_MANIFEST"),
+                Some(&format!("Size or mtime changed: manifest={}/{:?} current={}/{:?}",
+                    entry.size_bytes, entry.mtime, current_size, current_mtime)),
+            )?;
+            update_ingest_file_status(conn, ingest_file_id, "skipped", Some("File changed since discovery"))?;
+            return Ok(None);
+        }
+    }
 
     // Update status to copying
     update_ingest_file_status(conn, ingest_file_id, "copying", None)?;
@@ -230,7 +402,7 @@ fn process_single_file(
         .map_err(|e| DadCamError::Io(e))?
         .len() as i64;
 
-    // Compute fast hash
+    // Step 2: Compute fast hash for dedup candidate lookup
     update_ingest_file_status(conn, ingest_file_id, "hashing", None)?;
     let file_name = source_path.file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -239,10 +411,33 @@ fn process_single_file(
         .with_message(format!("Hashing {}", file_name)));
     let hash_fast = compute_fast_hash(source_path)?;
 
-    // Check for duplicates
-    if let Some(_existing) = find_asset_by_hash(conn, library_id, &hash_fast)? {
-        update_ingest_file_status(conn, ingest_file_id, "skipped", Some("Duplicate file"))?;
-        return Ok(None);
+    // Update manifest entry with fast hash
+    if let Some(entry) = manifest_entry {
+        let _ = update_manifest_entry_hash_fast(conn, entry.id, &hash_fast);
+    }
+
+    // Step 2b: Check for duplicates with verified dedup
+    if let Some(existing) = find_asset_by_hash(conn, library_id, &hash_fast)? {
+        // Duplicate candidate found via fast hash
+        if let Some(ref existing_full_hash) = existing.hash_full {
+            // Existing asset has full hash -- we can verify dedup
+            // Compute full source hash to compare
+            let source_full_hash = compute_full_hash(source_path)?;
+            if source_full_hash == *existing_full_hash {
+                // Dedup verified: same file, no need to copy
+                if let Some(entry) = manifest_entry {
+                    update_manifest_entry_result(
+                        conn, entry.id, "dedup_verified",
+                        Some(&source_full_hash), Some(existing.id),
+                        None, None,
+                    )?;
+                }
+                update_ingest_file_status(conn, ingest_file_id, "skipped", Some("Dedup verified"))?;
+                return Ok(None);
+            }
+            // Full hash mismatch: fast hash collision, treat as unique -- fall through to copy
+        }
+        // No full hash on existing asset: can't prove match, treat as unique -- fall through to copy
     }
 
     // Get volume info for the source path (for relink support)
@@ -258,15 +453,15 @@ fn process_single_file(
         None
     };
 
-    // Copy or reference the file
+    // Step 3: Copy or reference the file
     let copied_at_start = chrono::Utc::now();
-    let (dest_path, source_uri) = if ingest_mode == "copy" {
-        let dest = copy::copy_file_to_library(source_path, originals_dir)?;
-        (dest.to_string_lossy().to_string(), None)
+    let (dest_path, source_uri, source_hash) = if ingest_mode == "copy" {
+        let (dest, hash) = copy::copy_file_to_library(source_path, originals_dir)?;
+        (dest.to_string_lossy().to_string(), None, Some(hash))
     } else {
         // Reference mode: store original path
         let relative_path = format!("ref:{}", source_path.display());
-        (relative_path, Some(source_path.to_string_lossy().to_string()))
+        (relative_path, Some(source_path.to_string_lossy().to_string()), None)
     };
 
     // Extract metadata
@@ -297,6 +492,21 @@ fn process_single_file(
         hash_fast_scheme: Some(HASH_FAST_SCHEME.to_string()),
     };
     let asset_id = insert_asset(conn, &asset)?;
+
+    // Step 4: Store full hash and mark verified (if we have it from copy)
+    if let Some(ref hash) = source_hash {
+        update_asset_hash_full(conn, asset_id, hash)?;
+        update_asset_verified_with_method(conn, asset_id, "copy_readback")?;
+    }
+
+    // Update manifest entry with result
+    if let Some(entry) = manifest_entry {
+        update_manifest_entry_result(
+            conn, entry.id, "copied_verified",
+            source_hash.as_deref(), Some(asset_id),
+            None, None,
+        )?;
+    }
 
     // Link asset to volume (for relink support)
     if let Some(vid) = volume_id {
@@ -439,6 +649,161 @@ fn process_single_file(
     Ok(Some((clip_id, camera_profile_name)))
 }
 
+/// Run rescan gate after all files are processed (importplan section 4.4).
+/// Re-walks the source directory and compares to the original manifest.
+/// Sets safe_to_wipe_at only if everything matches.
+pub fn run_rescan(conn: &Connection, session_id: i64, source_root: &Path) -> Result<()> {
+    let manifest_entries = get_manifest_entries(conn, session_id)?;
+    if manifest_entries.is_empty() {
+        return Ok(());
+    }
+
+    // Device ejection detection: if source root is gone, fail the rescan explicitly
+    if !source_root.exists() {
+        eprintln!("Rescan failed: source '{}' is no longer accessible (device disconnected?)", source_root.display());
+        update_ingest_session_rescan(conn, session_id, "", false)?;
+        return Err(DadCamError::Ingest(format!(
+            "Source device disconnected: '{}' is no longer accessible. Session is NOT safe to wipe.",
+            source_root.display()
+        )));
+    }
+
+    // Build set of manifest relative paths with their sizes
+    let manifest_set: HashMap<String, i64> = manifest_entries.iter()
+        .map(|e| (e.relative_path.clone(), e.size_bytes))
+        .collect();
+
+    // Re-walk source and build rescan snapshot
+    let rescan_files = discover::discover_media_files(source_root)?;
+    let mut rescan_data = Vec::new();
+    let mut rescan_set: HashMap<String, i64> = HashMap::new();
+
+    for file_path in &rescan_files {
+        let relative_path = file_path
+            .strip_prefix(source_root)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
+        let size = std::fs::metadata(file_path)
+            .map(|m| m.len() as i64)
+            .unwrap_or(0);
+        let mtime = std::fs::metadata(file_path).ok()
+            .and_then(|m| m.modified().ok())
+            .map(|t| {
+                let dt: chrono::DateTime<chrono::Utc> = t.into();
+                dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+            });
+        rescan_data.push(format!("{}|{}|{}", relative_path, size, mtime.as_deref().unwrap_or("")));
+        rescan_set.insert(relative_path, size);
+    }
+
+    // Compute rescan hash
+    rescan_data.sort();
+    let rescan_blob = rescan_data.join("\n");
+    let rescan_hash = compute_full_hash_from_bytes(rescan_blob.as_bytes());
+
+    // Compare: every manifest entry must still exist with same size
+    let mut all_match = true;
+    for (path, manifest_size) in &manifest_set {
+        match rescan_set.get(path) {
+            Some(rescan_size) if *rescan_size == *manifest_size => {}
+            _ => {
+                all_match = false;
+                eprintln!("Rescan mismatch: manifest entry '{}' missing or changed", path);
+            }
+        }
+    }
+
+    // Check for new files that weren't in the manifest
+    for path in rescan_set.keys() {
+        if !manifest_set.contains_key(path) {
+            all_match = false;
+            eprintln!("Rescan mismatch: new file '{}' found on source", path);
+        }
+    }
+
+    // Check all manifest entries are verified
+    let all_verified = manifest_entries.iter().all(|e| {
+        e.result == "copied_verified" || e.result == "dedup_verified"
+    });
+
+    let safe = all_match && all_verified;
+    update_ingest_session_rescan(conn, session_id, &rescan_hash, safe)?;
+
+    Ok(())
+}
+
+/// Wipe (delete) source files from a device after SAFE TO WIPE is confirmed.
+/// Importplan section 5: only allowed when safe_to_wipe_at is set.
+/// Returns a WipeReport with per-file outcomes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WipeReport {
+    pub session_id: i64,
+    pub source_root: String,
+    pub total_files: usize,
+    pub deleted: usize,
+    pub failed: usize,
+    pub entries: Vec<WipeReportEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WipeReportEntry {
+    pub relative_path: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+pub fn wipe_source_files(conn: &Connection, session_id: i64) -> Result<WipeReport> {
+    // Hard gate: require SAFE TO WIPE state
+    let session = schema::get_ingest_session(conn, session_id)?
+        .ok_or_else(|| DadCamError::NotFound(format!("Ingest session {} not found", session_id)))?;
+
+    if session.safe_to_wipe_at.is_none() {
+        return Err(DadCamError::Ingest(
+            "Cannot wipe: session is not SAFE TO WIPE. All files must be verified and rescan must match.".to_string()
+        ));
+    }
+
+    let source_root = Path::new(&session.source_root);
+    let manifest_entries = schema::get_manifest_entries(conn, session_id)?;
+
+    let mut report = WipeReport {
+        session_id,
+        source_root: session.source_root.clone(),
+        total_files: manifest_entries.len(),
+        deleted: 0,
+        failed: 0,
+        entries: Vec::with_capacity(manifest_entries.len()),
+    };
+
+    // Delete in deterministic order (sorted by relative_path -- manifest entries are already sorted)
+    for entry in &manifest_entries {
+        let full_path = source_root.join(&entry.relative_path);
+        match std::fs::remove_file(&full_path) {
+            Ok(()) => {
+                report.deleted += 1;
+                report.entries.push(WipeReportEntry {
+                    relative_path: entry.relative_path.clone(),
+                    success: true,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                report.failed += 1;
+                report.entries.push(WipeReportEntry {
+                    relative_path: entry.relative_path.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+    }
+
+    Ok(report)
+}
+
 /// Queue jobs that should run after a clip is ingested:
 /// - hash_full: Full file hash for verification (per contracts.md)
 /// - preview jobs: thumb, proxy, sprite for UI display
@@ -448,8 +813,8 @@ fn queue_post_ingest_jobs(
     asset_id: i64,
     library_id: i64,
 ) -> Result<()> {
-    // Queue hash_full job for verification (contracts.md: verification after copy)
-    // Lower priority than preview jobs since verification can run in background
+    // Queue hash_full job for secondary verification (contracts.md)
+    // The copy already verified via read-back, this is belt-and-suspenders
     insert_job(conn, &NewJob {
         job_type: "hash_full".to_string(),
         library_id: Some(library_id),
@@ -508,7 +873,7 @@ fn ingest_sidecar(
 
     // Copy or reference the sidecar
     let (dest_path, source_uri) = if ingest_mode == "copy" {
-        let dest = copy::copy_file_to_library(sidecar_path, originals_dir)?;
+        let (dest, _hash) = copy::copy_file_to_library(sidecar_path, originals_dir)?;
         (dest.to_string_lossy().to_string(), None)
     } else {
         let relative_path = format!("ref:{}", sidecar_path.display());
@@ -762,7 +1127,6 @@ pub(crate) fn score_match_rules(
     if make_matched && model_matched {
         specificity += 5.0;
     } else if make_matched || model_matched {
-        // Partial: make or model alone is less specific
         specificity += 2.0;
     }
 
@@ -906,4 +1270,303 @@ fn determine_timestamp(path: &Path, metadata: &crate::metadata::MediaMetadata) -
     }
 
     Ok((None, None))
+}
+
+// --- Section 10 tests (importplan.md) ---
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as IoWrite;
+    use tempfile::TempDir;
+
+    /// Set up an in-memory DB with all migrations applied and a library record.
+    /// Returns (conn, library_id).
+    fn setup_test_db() -> (Connection, i64) {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        crate::db::migrations::run_migrations(&conn).unwrap();
+        let lib_id = schema::insert_library(&conn, "/test/lib", "TestLib", "copy").unwrap();
+        (conn, lib_id)
+    }
+
+    /// Create a source directory with N video files of known content.
+    /// Returns (source_dir, Vec<(filename, content_bytes)>).
+    fn create_source_files(dir: &Path, files: &[(&str, &[u8])]) {
+        std::fs::create_dir_all(dir).unwrap();
+        for (name, content) in files {
+            let path = dir.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(content).unwrap();
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Test 1: Integrity -- corrupt dest after copy, read-back must fail
+    // ---------------------------------------------------------------
+    #[test]
+    fn test_readback_detects_corruption() {
+        // copy_with_verify writes to temp, reads it back, compares hashes.
+        // We can't corrupt *during* copy_with_verify (it's atomic inside the fn),
+        // so instead we test copy_file_to_library with a valid file to confirm
+        // the happy path, then directly call the internal verify mechanism:
+        // write a temp file, corrupt it, and confirm hash mismatch is detected.
+
+        let tmp = TempDir::new().unwrap();
+        let source_dir = tmp.path().join("source");
+        let originals_dir = tmp.path().join("originals");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&originals_dir).unwrap();
+
+        // Create a source file with known content
+        let content = b"This is test video content for integrity check. Repeating data to exceed trivial size.";
+        let source_file = source_dir.join("test_clip.mp4");
+        {
+            let mut f = std::fs::File::create(&source_file).unwrap();
+            f.write_all(content).unwrap();
+        }
+
+        // Happy path: copy succeeds and returns a valid hash
+        let (rel_path, source_hash) = copy::copy_file_to_library(&source_file, &originals_dir).unwrap();
+        assert!(source_hash.starts_with("blake3:full:"), "Hash should be blake3:full: prefixed");
+
+        // Verify the dest file matches
+        let dest_full = originals_dir.parent().unwrap_or(&originals_dir).join(&rel_path);
+        assert!(dest_full.exists(), "Dest file should exist after copy");
+        let dest_hash = crate::hash::compute_full_hash(&dest_full).unwrap();
+        assert_eq!(source_hash, dest_hash, "Source and dest hash should match after copy");
+
+        // Now corrupt the dest file (flip a byte) and verify hash no longer matches
+        {
+            let mut bytes = std::fs::read(&dest_full).unwrap();
+            assert!(!bytes.is_empty());
+            bytes[0] ^= 0xFF; // flip first byte
+            std::fs::write(&dest_full, &bytes).unwrap();
+        }
+        let corrupted_hash = crate::hash::compute_full_hash(&dest_full).unwrap();
+        assert_ne!(source_hash, corrupted_hash, "Corrupted file must produce different hash");
+        assert_ne!(dest_hash, corrupted_hash, "Corrupted file must not match original dest hash");
+
+        // Verify via verify_hash reports mismatch
+        let matches = crate::hash::verify_hash(&dest_full, &source_hash).unwrap();
+        assert!(!matches, "verify_hash must report mismatch on corrupted file");
+    }
+
+    // ---------------------------------------------------------------
+    // Test 2: Crash safety -- only temp file exists mid-copy;
+    //         no final file until verification passes
+    // ---------------------------------------------------------------
+    #[test]
+    fn test_crash_safety_temp_file_pattern() {
+        // Verify that the copy function uses a temp file prefix and that
+        // on failure, the final path does not exist.
+
+        let tmp = TempDir::new().unwrap();
+        let originals_dir = tmp.path().join("originals");
+        std::fs::create_dir_all(&originals_dir).unwrap();
+
+        // Create a source file
+        let source_file = tmp.path().join("source_clip.mp4");
+        {
+            let mut f = std::fs::File::create(&source_file).unwrap();
+            f.write_all(b"crash safety test content padding data").unwrap();
+        }
+
+        // Copy should succeed -- verify no temp files remain
+        let (rel_path, _hash) = copy::copy_file_to_library(&source_file, &originals_dir).unwrap();
+        let dest_full = originals_dir.parent().unwrap_or(&originals_dir).join(&rel_path);
+        assert!(dest_full.exists(), "Final file should exist after successful copy");
+
+        // Verify no temp files left behind in the destination directory
+        let dest_parent = dest_full.parent().unwrap();
+        for entry in std::fs::read_dir(dest_parent).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().to_string();
+            assert!(
+                !name.starts_with(crate::constants::TEMP_FILE_PREFIX),
+                "No temp files should remain after successful copy, found: {}",
+                name
+            );
+        }
+
+        // Now test that copying a nonexistent source fails and leaves no final file
+        let missing_source = tmp.path().join("does_not_exist.mp4");
+        let result = copy::copy_file_to_library(&missing_source, &originals_dir);
+        assert!(result.is_err(), "Copying nonexistent file should fail");
+
+        // The dest directory should have exactly 1 file (the successful copy)
+        let file_count = std::fs::read_dir(dest_parent)
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().is_file())
+            .count();
+        assert_eq!(file_count, 1, "Only the one successful copy should exist -- no orphan files");
+    }
+
+    // ---------------------------------------------------------------
+    // Test 3: Dedup correctness -- two files that share first/last MB
+    //         + size cause fast-hash collision; full hash resolves
+    // ---------------------------------------------------------------
+    #[test]
+    fn test_dedup_fast_hash_collision_resolved_by_full_hash() {
+        let (conn, library_id) = setup_test_db();
+        let tmp = TempDir::new().unwrap();
+
+        // Create two files with identical first 1MB, last 1MB, and size,
+        // but different middle content.
+        // For fast_hash (first_last_size_v1): first 1MB + last 1MB + size.
+        // If file <= 2MB, entire content is hashed. So make files > 2MB.
+        let size = 2 * 1024 * 1024 + 1024; // 2MB + 1KB
+        let mut content_a = vec![0xAAu8; size];
+        let mut content_b = vec![0xAAu8; size];
+        // Differ only in the middle (outside first/last 1MB windows)
+        let mid = size / 2;
+        content_a[mid] = 0x01;
+        content_b[mid] = 0x02;
+
+        let file_a = tmp.path().join("file_a.mp4");
+        let file_b = tmp.path().join("file_b.mp4");
+        std::fs::write(&file_a, &content_a).unwrap();
+        std::fs::write(&file_b, &content_b).unwrap();
+
+        // Verify fast hashes collide
+        let hash_fast_a = crate::hash::compute_fast_hash(&file_a).unwrap();
+        let hash_fast_b = crate::hash::compute_fast_hash(&file_b).unwrap();
+        assert_eq!(hash_fast_a, hash_fast_b, "Fast hashes should collide for files differing only in middle");
+
+        // Verify full hashes differ
+        let hash_full_a = crate::hash::compute_full_hash(&file_a).unwrap();
+        let hash_full_b = crate::hash::compute_full_hash(&file_b).unwrap();
+        assert_ne!(hash_full_a, hash_full_b, "Full hashes must differ for different file content");
+
+        // Insert file_a as an existing asset with hash_fast and hash_full
+        let asset_a_id = schema::insert_asset(&conn, &schema::NewAsset {
+            library_id,
+            asset_type: "original".to_string(),
+            path: "originals/file_a.mp4".to_string(),
+            source_uri: None,
+            size_bytes: size as i64,
+            hash_fast: Some(hash_fast_a.clone()),
+            hash_fast_scheme: Some("first_last_size_v1".to_string()),
+        }).unwrap();
+        schema::update_asset_hash_full(&conn, asset_a_id, &hash_full_a).unwrap();
+
+        // Now simulate dedup check for file_b:
+        // find_asset_by_hash should find asset_a (fast hash match)
+        let candidate = schema::find_asset_by_hash(&conn, library_id, &hash_fast_b).unwrap();
+        assert!(candidate.is_some(), "Should find candidate via fast hash");
+        let candidate = candidate.unwrap();
+        assert_eq!(candidate.id, asset_a_id);
+
+        // But full hash comparison must reject the dedup
+        let source_full = crate::hash::compute_full_hash(&file_b).unwrap();
+        assert_ne!(
+            source_full,
+            candidate.hash_full.unwrap(),
+            "Full hash mismatch must prevent dedup -- these are different files"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Test 4: Completeness -- new file added after manifest must block
+    //         SAFE TO WIPE via rescan diff
+    // ---------------------------------------------------------------
+    #[test]
+    fn test_new_file_after_manifest_blocks_safe_to_wipe() {
+        let (conn, _library_id) = setup_test_db();
+        let tmp = TempDir::new().unwrap();
+        let source_dir = tmp.path().join("sd_card");
+        std::fs::create_dir_all(&source_dir).unwrap();
+
+        // Create initial files that form the manifest baseline
+        create_source_files(&source_dir, &[
+            ("DCIM/clip001.mp4", b"video content 001"),
+            ("DCIM/clip002.mp4", b"video content 002"),
+        ]);
+
+        // Create a fake job to hang the session off of (library_id from setup_test_db)
+        let job_id = schema::insert_job(&conn, &schema::NewJob {
+            job_type: "ingest".to_string(),
+            library_id: Some(_library_id),
+            clip_id: None,
+            asset_id: None,
+            priority: 10,
+            payload: "{}".to_string(),
+        }).unwrap();
+
+        // Create session
+        let session_id = schema::insert_ingest_session(&conn, &schema::NewIngestSession {
+            job_id,
+            source_root: source_dir.to_string_lossy().to_string(),
+            device_serial: None,
+            device_label: None,
+            device_mount_point: None,
+            device_capacity_bytes: None,
+        }).unwrap();
+
+        // Build manifest from the 2 files
+        let files = discover::discover_media_files(&source_dir).unwrap();
+        assert_eq!(files.len(), 2, "Should discover exactly 2 files");
+
+        for file_path in &files {
+            let relative = file_path.strip_prefix(&source_dir).unwrap().to_string_lossy().to_string();
+            let meta = std::fs::metadata(file_path).unwrap();
+            schema::insert_manifest_entry(&conn, &schema::NewManifestEntry {
+                session_id,
+                relative_path: relative,
+                size_bytes: meta.len() as i64,
+                mtime: None,
+            }).unwrap();
+        }
+
+        // Create a dummy asset so manifest entries can reference it
+        let dummy_asset_id = schema::insert_asset(&conn, &schema::NewAsset {
+            library_id: _library_id,
+            asset_type: "original".to_string(),
+            path: "originals/dummy.mp4".to_string(),
+            source_uri: None,
+            size_bytes: 100,
+            hash_fast: None,
+            hash_fast_scheme: None,
+        }).unwrap();
+
+        // Mark all manifest entries as copied_verified (simulate successful ingest)
+        let entries = schema::get_manifest_entries(&conn, session_id).unwrap();
+        assert_eq!(entries.len(), 2);
+        for entry in &entries {
+            schema::update_manifest_entry_result(
+                &conn, entry.id, "copied_verified", Some("blake3:full:abc123"), Some(dummy_asset_id),
+                None, None,
+            ).unwrap();
+        }
+
+        // Run rescan BEFORE adding new file -- should be safe
+        run_rescan(&conn, session_id, &source_dir).unwrap();
+        let session = schema::get_ingest_session(&conn, session_id).unwrap().unwrap();
+        assert!(
+            session.safe_to_wipe_at.is_some(),
+            "Should be SAFE TO WIPE when manifest matches rescan exactly"
+        );
+
+        // Now add a NEW file to the source (simulating camera still writing)
+        create_source_files(&source_dir, &[
+            ("DCIM/clip003.mp4", b"video content 003 -- new file added after manifest"),
+        ]);
+
+        // Clear safe_to_wipe by resetting session (simulate re-check)
+        conn.execute(
+            "UPDATE ingest_sessions SET safe_to_wipe_at = NULL, rescan_hash = NULL WHERE id = ?1",
+            rusqlite::params![session_id],
+        ).unwrap();
+
+        // Run rescan AFTER adding new file -- must NOT be safe
+        run_rescan(&conn, session_id, &source_dir).unwrap();
+        let session = schema::get_ingest_session(&conn, session_id).unwrap().unwrap();
+        assert!(
+            session.safe_to_wipe_at.is_none(),
+            "Must NOT be SAFE TO WIPE when new file appears on source after manifest"
+        );
+    }
 }

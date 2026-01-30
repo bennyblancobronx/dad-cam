@@ -112,7 +112,10 @@ fn run_ingest_job(conn: &Connection, job: &schema::Job, library_root: &Path, app
     Ok(())
 }
 
-/// Run a full hash job
+/// Run a full hash job (secondary verification per importplan).
+/// If asset already has hash_full (from copy_readback), compare dest hash to stored.
+/// Mismatch = clear verification. Match = re-stamp verified_at.
+/// If no hash_full (legacy): store + mark verified (backward compat).
 fn run_hash_full_job(conn: &Connection, job: &schema::Job, app: Option<&AppHandle>) -> Result<()> {
     let asset_id = job.asset_id
         .ok_or_else(|| DadCamError::Other("Hash job has no asset_id".to_string()))?;
@@ -134,12 +137,27 @@ fn run_hash_full_job(conn: &Connection, job: &schema::Job, app: Option<&AppHandl
     emit_progress_opt(app, &JobProgress::new(&job_id_str, "hashing", 0, 1)
         .with_message("Computing full file hash"));
 
-    // Compute full hash
-    let hash_full = crate::hash::compute_full_hash(&full_path)?;
+    // Compute full hash of destination file on disk
+    let dest_hash = crate::hash::compute_full_hash(&full_path)?;
 
-    // Update asset
-    schema::update_asset_hash_full(conn, asset_id, &hash_full)?;
-    schema::update_asset_verified(conn, asset_id)?;
+    if let Some(ref stored_hash) = asset.hash_full {
+        // Asset already has a hash_full (set during copy_readback).
+        // This is secondary verification: compare dest hash to stored.
+        if dest_hash != *stored_hash {
+            // Mismatch: clear verification -- something changed on disk
+            schema::clear_asset_verified(conn, asset_id)?;
+            return Err(DadCamError::Hash(format!(
+                "Secondary verification failed for asset {}: stored={} computed={}",
+                asset_id, stored_hash, dest_hash
+            )));
+        }
+        // Match: re-stamp verified_at with secondary method
+        schema::update_asset_verified_with_method(conn, asset_id, "secondary_hash")?;
+    } else {
+        // Legacy: no hash_full stored yet. Store + mark verified.
+        schema::update_asset_hash_full(conn, asset_id, &dest_hash)?;
+        schema::update_asset_verified_with_method(conn, asset_id, "background_hash")?;
+    }
 
     Ok(())
 }

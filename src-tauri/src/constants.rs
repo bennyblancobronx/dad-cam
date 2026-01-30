@@ -67,6 +67,10 @@ pub const JOB_BASE_BACKOFF_SECONDS: i64 = 60;
 pub const JOB_LEASE_DURATION_SECONDS: i64 = 300; // 5 minutes
 pub const JOB_HEARTBEAT_INTERVAL_SECONDS: i64 = 30;
 
+// Ingest copy settings
+pub const COPY_CHUNK_SIZE: usize = 1_048_576; // 1MB streaming chunk
+pub const TEMP_FILE_PREFIX: &str = ".dadcam_tmp_";
+
 // Sidecar extensions (files to copy alongside videos)
 pub const SIDECAR_EXTENSIONS: [&str; 6] = ["thm", "xml", "xmp", "srt", "lrf", "idx"];
 

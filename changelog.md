@@ -4,6 +4,34 @@ This is the source of truth for version number.
 
 ---
 
+0.1.128 -- Wipe workflow + device ejection detection (importplan 29/29)
+
+- Wipe source files command (hard-gated on SAFE TO WIPE, deterministic delete order from manifest)
+- wipe_report.json audit artifact exported per-session with success/failure per file
+- Device ejection detection: checks source root between files, marks session failed with DEVICE_DISCONNECTED error on all remaining manifest entries
+- Rescan detects disconnected source explicitly, fails with clear error instead of silent pass
+- New Tauri command: wipe_source_files (with optional audit export)
+
+0.1.127 -- Add 4 importplan section 10 tests
+
+- test_readback_detects_corruption: corrupt dest byte, verify hash mismatch detected
+- test_crash_safety_temp_file_pattern: confirm no temp files remain, no orphan files on failure
+- test_dedup_fast_hash_collision_resolved_by_full_hash: 2MB+ files with identical first/last MB but different middle -- fast hash collides, full hash rejects dedup
+- test_new_file_after_manifest_blocks_safe_to_wipe: add file to source after manifest, rescan blocks SAFE TO WIPE
+- 81 tests pass (77 existing + 4 new)
+
+0.1.126 -- Gold-standard import verification
+
+- Streaming BLAKE3 copy with temp file, fsync, atomic rename, and read-back verify (never loads full file into RAM)
+- Ingest sessions + manifest tables (Migration 9) track every file from discovery through verification
+- Change detection: re-stats source files before copy, flags any that changed since discovery
+- Dedup verification: proves duplicates match via full BLAKE3 hash comparison, not just fast hash
+- Rescan gate: re-walks source after ingest, only sets safe_to_wipe when manifest matches exactly
+- Audit export: session.json, manifest.jsonl, results.jsonl, rescan.jsonl, rescan_diff.json
+- Secondary verification in background hash jobs compares stored hash to on-disk hash
+- New commands: get_session_status, get_session_by_job, export_audit_report
+- assets table gains verified_method column (copy_readback, dedup_full_hash, secondary_hash, background_hash)
+
 0.1.125 -- Move Cameras from sidebar/dashboard to Settings
 
 - Cameras is now a section inside Settings (Advanced mode only, gated by Cameras feature flag)

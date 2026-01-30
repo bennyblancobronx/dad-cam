@@ -364,6 +364,52 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX IF NOT EXISTS idx_vhs_edits_created_at ON vhs_edits(created_at);
     "#,
+
+    // Migration 9: Gold-standard import verification (importplan.md)
+    // Ingest sessions, manifest entries, and verified_method on assets.
+    r#"
+    -- Ingest sessions (one per import from a device)
+    CREATE TABLE ingest_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id INTEGER NOT NULL REFERENCES jobs(id),
+        source_root TEXT NOT NULL,
+        device_serial TEXT,
+        device_label TEXT,
+        device_mount_point TEXT,
+        device_capacity_bytes INTEGER,
+        status TEXT NOT NULL DEFAULT 'discovering'
+            CHECK (status IN ('discovering','ingesting','verifying','rescanning','complete','failed')),
+        manifest_hash TEXT,
+        rescan_hash TEXT,
+        safe_to_wipe_at TEXT,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        finished_at TEXT
+    );
+
+    -- Manifest entries (one per discovered eligible file on device)
+    CREATE TABLE ingest_manifest_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES ingest_sessions(id),
+        relative_path TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        mtime TEXT,
+        hash_fast TEXT,
+        hash_source_full TEXT,
+        asset_id INTEGER REFERENCES assets(id),
+        result TEXT NOT NULL DEFAULT 'pending'
+            CHECK (result IN ('pending','copying','copied_verified','dedup_verified',
+                              'skipped_ineligible','failed','changed')),
+        error_code TEXT,
+        error_detail TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_manifest_session ON ingest_manifest_entries(session_id);
+    CREATE INDEX idx_manifest_result ON ingest_manifest_entries(result);
+
+    -- Add verified_method to assets
+    ALTER TABLE assets ADD COLUMN verified_method TEXT;
+    "#,
 ];
 
 /// Get current schema version from database

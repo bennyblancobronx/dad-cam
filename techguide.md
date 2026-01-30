@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.125
+Version: 0.1.128
 
 ---
 
@@ -523,6 +523,7 @@ Tauri Command Layer:
 - Phase 7 Commands: validate_reference_path, create_reference_library, create_batch_ingest, get_batch_progress, start_relink_scan, get_relink_candidates, apply_relink_candidate, get_offline_clips, list_codec_presets, create_codec_preset, get_clip_volume_info
 - Phase 8 Commands: get_ml_analysis, analyze_clip_ml, get_ml_analysis_status, record_clip_view, train_personalized_scoring, get_best_clips_ml
 - Library Fix Commands: list_bundled_profiles, list_user_profiles, create_user_profile, update_user_profile, delete_user_profile, list_camera_devices, register_camera_device, match_camera, import_camera_db, export_camera_db, stage_profile, list_staged, validate_staged, publish_staged, discard_staged, list_registry_libraries
+- Import Verification Commands: get_session_status, get_session_by_job, export_audit_report, wipe_source_files
 - Settings Commands (App DB): get_app_settings, save_app_settings, get_mode, set_mode, add_recent_library, remove_recent_library, get_recent_libraries, validate_library_path
 - All responses use camelCase (serde rename_all)
 
@@ -965,6 +966,68 @@ Features:
 Sidecar Files:
 - Written to .dadcam/sidecars/<clip_id>.json during ingest
 - Schema v0.2.0: MetadataSnapshot, CameraMatchSnapshot, IngestTimestamps, DerivedAssetPaths
+
+---
+
+Import Verification (Gold Standard)
+
+Bulletproof import pipeline ensuring every byte is verified before source deletion is allowed.
+See docs/planning/importplan.md for the full specification.
+
+Pipeline (per file):
+1. Discover: Walk source, filter video extensions, record file stats
+2. Pre-copy stat check: Re-stat source file, abort if size/mtime changed since discovery
+3. Streaming copy: Read source in 8MB chunks, feed each chunk to BLAKE3 hasher AND write to temp file
+4. Fsync + close: Flush temp file to disk
+5. Read-back verify: Re-read temp file in chunks, compute fresh BLAKE3 hash, compare to copy-time hash
+6. Atomic rename: Rename temp file to final destination (no partial files visible)
+7. Manifest update: Record source_hash, dest_hash, result per file
+
+Key invariants:
+- Never loads full file into RAM (streaming 8MB chunks)
+- Temp files use `.dadcam_tmp_` prefix (crash cleanup: any leftover temp = incomplete)
+- Read-back hash must match copy-time hash or file is marked failed
+- Dedup verification: when fast hash matches existing clip, full BLAKE3 proves identity (not just first+last MB)
+
+Ingest Sessions (Migration 9):
+- ingest_sessions table: tracks source_root, status, manifest frozen timestamp, rescan results, safe_to_wipe_at
+- ingest_manifest table: per-file row with relative_path, source_hash, dest_hash, result, error_code, error_detail
+- Status flow: pending -> running -> completed/failed
+- safe_to_wipe_at: NULL until rescan proves manifest matches source exactly
+
+Rescan Gate:
+- After all files processed, re-walks source directory
+- Compares discovered files against frozen manifest
+- If any new/missing/changed files found: rescan fails, safe_to_wipe_at stays NULL
+- Only when manifest matches source exactly: safe_to_wipe_at is set
+
+Wipe Workflow:
+- Hard-gated: refuses if safe_to_wipe_at is NULL
+- Reads manifest entries in deterministic order
+- Deletes each source file individually, records success/failure per file
+- Returns WipeReport with total_files, deleted, failed counts + per-file entries
+- Tauri command: wipe_source_files(session_id, output_dir?)
+
+Device Ejection Detection:
+- During ingest loop: checks source_root.exists() between each file
+- If source disappears mid-import: marks session failed, emits DEVICE_DISCONNECTED error
+- All remaining pending/copying manifest entries marked failed with DEVICE_DISCONNECTED code
+- During rescan: checks source_root.exists() before walking, fails explicitly if disconnected
+- Clear error message: "Source device disconnected. Session is NOT safe to wipe."
+
+Audit Artifacts (exported to audit_session_<id>/ directory):
+- session.json: Full session record with status and timestamps
+- manifest.jsonl: One line per manifest entry
+- results.jsonl: Per-file copy/verify outcomes
+- rescan.jsonl: Rescan walk results
+- rescan_diff.json: Differences found during rescan (new/missing/changed files)
+- wipe_report.json: Per-file wipe outcomes (success/failure)
+
+Tauri Commands:
+- get_session_status: Get session verification status (total, verified, failed, pending, safe_to_wipe)
+- get_session_by_job: Look up session by ingest job ID
+- export_audit_report: Export all audit artifacts to directory
+- wipe_source_files: Execute wipe workflow (hard-gated on safe_to_wipe_at)
 
 ---
 

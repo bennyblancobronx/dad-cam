@@ -6,7 +6,7 @@ use tauri::State;
 use serde::{Deserialize, Serialize};
 
 use crate::db::{get_db_path, init_library_folders, ensure_library_db_initialized};
-use crate::db::schema;
+use crate::db::schema::{self, SessionVerificationStatus, IngestSession};
 use crate::db::app_schema;
 use crate::db::app_db;
 use crate::camera;
@@ -252,4 +252,46 @@ pub fn list_registry_libraries() -> Result<Vec<RegistryLibraryEntry>, String> {
     }
 
     Ok(result)
+}
+
+/// Get verification status for an ingest session
+#[tauri::command]
+pub fn get_session_status(state: State<DbState>, session_id: i64) -> Result<SessionVerificationStatus, String> {
+    let conn = state.connect()?;
+    schema::get_session_verification_status(&conn, session_id).map_err(|e| e.to_string())
+}
+
+/// Get ingest session by job ID
+#[tauri::command]
+pub fn get_session_by_job(state: State<DbState>, job_id: i64) -> Result<Option<IngestSession>, String> {
+    let conn = state.connect()?;
+    schema::get_ingest_session_by_job(&conn, job_id).map_err(|e| e.to_string())
+}
+
+/// Export audit report for an ingest session
+#[tauri::command]
+pub fn export_audit_report(state: State<DbState>, session_id: i64, output_dir: String) -> Result<String, String> {
+    let conn = state.connect()?;
+    let output_path = std::path::Path::new(&output_dir);
+    let result = crate::ingest::audit::export_audit_report(&conn, session_id, output_path)
+        .map_err(|e| e.to_string())?;
+    Ok(result.to_string_lossy().to_string())
+}
+
+/// Wipe (delete) source files from a device after SAFE TO WIPE is confirmed.
+/// Hard-gated: requires safe_to_wipe_at to be set on the session.
+/// Returns wipe report with per-file success/failure.
+#[tauri::command]
+pub fn wipe_source_files(state: State<DbState>, session_id: i64, output_dir: Option<String>) -> Result<crate::ingest::WipeReport, String> {
+    let conn = state.connect()?;
+    let report = crate::ingest::wipe_source_files(&conn, session_id)
+        .map_err(|e| e.to_string())?;
+
+    // Export wipe_report.json if output_dir provided
+    if let Some(dir) = output_dir {
+        let output_path = std::path::Path::new(&dir);
+        let _ = crate::ingest::audit::export_wipe_report(&report, output_path);
+    }
+
+    Ok(report)
 }

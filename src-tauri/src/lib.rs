@@ -38,6 +38,7 @@ pub struct IngestResponse {
     pub failed: usize,
     pub clips_created: Vec<i64>,
     pub camera_breakdown: Vec<ingest::CameraBreakdown>,
+    pub session_id: Option<i64>,
 }
 
 // Ingest Commands (separate from Phase 3 clip/library/tag commands)
@@ -132,6 +133,7 @@ fn start_ingest(
         failed: result.failed,
         clips_created: result.clips_created,
         camera_breakdown: result.camera_breakdown,
+        session_id: result.session_id,
     })
 }
 
@@ -402,6 +404,11 @@ pub fn run() {
             commands::get_event_clips,
             commands::get_clips_grouped_by_date,
             commands::get_clips_by_date,
+            // Ingest verification commands
+            commands::get_session_status,
+            commands::get_session_by_job,
+            commands::export_audit_report,
+            commands::wipe_source_files,
             // Ingest commands
             start_ingest,
             get_jobs,
