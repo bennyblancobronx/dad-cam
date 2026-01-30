@@ -3,7 +3,6 @@
 
 import type { ReactNode } from 'react';
 import type { LibraryInfo } from '../types/clips';
-import type { AppMode, FeatureFlags } from '../types/settings';
 import { LeftNav } from './LeftNav';
 
 interface MainLayoutProps {
@@ -18,10 +17,6 @@ interface MainLayoutProps {
   isFavoritesActive?: boolean;
   /** Increment to trigger dates refresh */
   refreshTrigger?: number;
-  /** App mode for gating nav features */
-  mode?: AppMode;
-  /** Feature flags for gating nav features */
-  featureFlags?: FeatureFlags;
   /** Header content (back button, title, actions) */
   header?: ReactNode;
   /** Main content area */
@@ -37,8 +32,6 @@ export function MainLayout({
   activeDate,
   isFavoritesActive,
   refreshTrigger,
-  mode,
-  featureFlags,
   header,
   children,
 }: MainLayoutProps) {
@@ -53,8 +46,6 @@ export function MainLayout({
         activeDate={activeDate}
         isFavoritesActive={isFavoritesActive}
         refreshTrigger={refreshTrigger}
-        mode={mode}
-        featureFlags={featureFlags}
       />
       <div className="main-content">
         {header && <header className="main-header">{header}</header>}

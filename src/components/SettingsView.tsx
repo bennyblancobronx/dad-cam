@@ -5,6 +5,7 @@ import { useState, useRef } from 'react';
 import type { AppSettings, AppMode, FeatureFlags } from '../types/settings';
 import { setMode, saveAppSettings, getAppSettings } from '../api/settings';
 import { APP_VERSION } from '../constants';
+import { CamerasView } from './CamerasView';
 
 interface SettingsViewProps {
   settings: AppSettings;
@@ -13,7 +14,7 @@ interface SettingsViewProps {
   onOpenDevMenu?: () => void;
 }
 
-type SettingsSection = 'general' | 'features' | 'about';
+type SettingsSection = 'general' | 'features' | 'cameras' | 'about';
 
 export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu }: SettingsViewProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
@@ -75,6 +76,10 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
         },
       };
       await saveAppSettings(updatedSettings);
+      // If disabling cameras while viewing cameras section, redirect to features
+      if (flag === 'camerasTab' && !value && activeSection === 'cameras') {
+        setActiveSection('features');
+      }
       onSettingsChange(updatedSettings);
     } catch (err) {
       setError(
@@ -95,8 +100,8 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
       await setMode(newMode);
       // Re-fetch settings from backend to stay in sync (set_mode saves mode + flags)
       const updatedSettings = await getAppSettings();
-      // If switching to Simple while on the features tab, go back to general
-      if (newMode === 'simple' && activeSection === 'features') {
+      // If switching to Simple while on an advanced-only tab, go back to general
+      if (newMode === 'simple' && (activeSection === 'features' || activeSection === 'cameras')) {
         setActiveSection('general');
       }
       onSettingsChange(updatedSettings);
@@ -144,6 +149,19 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
                 <path d="M4 6h12M4 10h8M4 14h10" />
               </svg>
               Features
+            </button>
+          )}
+          {settings.mode === 'advanced' && settings.featureFlags.camerasTab && (
+            <button
+              className={`settings-nav-item ${activeSection === 'cameras' ? 'is-active' : ''}`}
+              onClick={() => setActiveSection('cameras')}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="5" width="16" height="10" rx="2" />
+                <circle cx="10" cy="10" r="3" />
+                <path d="M14 5V3h-3" />
+              </svg>
+              Cameras
             </button>
           )}
           <button
@@ -303,8 +321,8 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
 
                 <label className="feature-toggle-row">
                   <div className="feature-toggle-info">
-                    <span className="feature-toggle-label">Cameras Tab</span>
-                    <span className="feature-toggle-description">Show camera profiles and devices in the sidebar</span>
+                    <span className="feature-toggle-label">Cameras</span>
+                    <span className="feature-toggle-description">Manage camera profiles and registered devices in Settings</span>
                   </div>
                   <input
                     type="checkbox"
@@ -320,6 +338,10 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
                 <p className="settings-saving-indicator">Saving...</p>
               )}
             </div>
+          )}
+
+          {activeSection === 'cameras' && settings.mode === 'advanced' && (
+            <CamerasView />
           )}
 
           {activeSection === 'about' && (

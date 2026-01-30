@@ -647,8 +647,6 @@ export function LibraryView({
         activeDate={selectedDate}
         isFavoritesActive={currentView === 'clips' && filter === 'favorites'}
         refreshTrigger={refreshTrigger}
-        mode={mode}
-        featureFlags={settings?.featureFlags}
         header={headerContent}
       >
         {renderContent()}

@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.123
+Version: 0.1.125
 
 ---
 
@@ -533,7 +533,7 @@ Key Components:
 - VideoPlayer: HTML5 video with keyboard shortcuts
 - FilterBar: Filter buttons, search, date range, sort controls
 - LibraryView: Main library browser container
-- SettingsView: Full-page settings with left nav (200px) + content (640px max) per Braun D.5.8
+- SettingsView: Full-page settings with left nav (200px) + content (640px max) per Braun D.5.8. Sections: General, Features (Advanced), Cameras (Advanced + flag), About
 - LibraryDashboard: Pro mode multi-library selection grid
 
 Data Flow:
@@ -755,7 +755,7 @@ Feature Flags (Advanced mode only):
 - screenGrabs: Export still frames (default: true)
 - faceDetection: Face detection during scoring (default: true in Advanced, false in Simple)
 - bestClips: Auto-identify top clips (default: true)
-- camerasTab: Show cameras section in sidebar (default: true in Advanced, false in Simple)
+- camerasTab: Show cameras section in Settings (default: true in Advanced, false in Simple)
 
 First-Run Wizard:
 - Shown when firstRunCompleted is false
@@ -893,7 +893,7 @@ Tauri Commands:
 Camera System (Library Fix)
 
 Camera profiles and devices live in App DB (survive library deletion).
-Cameras UI works with no library open.
+Cameras UI is a section inside Settings (Advanced mode, gated by camerasTab feature flag). Works with no library open.
 See docs/planning/libraryfix.md for full spec.
 
 Matching Priority (spec 7.2):

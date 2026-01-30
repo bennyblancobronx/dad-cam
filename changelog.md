@@ -4,6 +4,16 @@ This is the source of truth for version number.
 
 ---
 
+0.1.125 -- Move Cameras from sidebar/dashboard to Settings
+
+- Cameras is now a section inside Settings (Advanced mode only, gated by Cameras feature flag)
+- Removed Cameras from left sidebar nav (LeftNav)
+- Removed Cameras action button from Library Dashboard
+- Removed standalone CamerasView routing from App.tsx
+- Cleaned up unused mode/featureFlags props from LeftNav, MainLayout
+- Updated feature toggle description from "Cameras Tab" to "Cameras"
+- Cameras is configuration, not workflow -- belongs in Settings with other setup tasks
+
 0.1.124 -- Version sync + compiler warning cleanup
 
 - Synced version to 0.1.123 across all 4 version files (tauri.conf.json was 0.1.116, constants.ts was 0.1.105, Cargo.toml and package.json were 0.1.0)

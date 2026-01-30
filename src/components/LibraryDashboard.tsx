@@ -17,19 +17,15 @@ import { clearThumbnailCache } from '../utils/thumbnailCache';
 import { LibraryCard } from './LibraryCard';
 
 interface LibraryDashboardProps {
-  settings: AppSettings;
   onLibrarySelect: (library: LibraryInfo) => void;
   onSettingsChange: (settings: AppSettings) => void;
   onNavigateToSettings: () => void;
-  onNavigateToCameras?: () => void;
 }
 
 export function LibraryDashboard({
-  settings,
   onLibrarySelect,
   onSettingsChange,
   onNavigateToSettings,
-  onNavigateToCameras,
 }: LibraryDashboardProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -345,22 +341,6 @@ export function LibraryDashboard({
                 </svg>
                 <span>{isLoading ? 'Opening...' : 'Open Project'}</span>
               </button>
-              {/* Cameras button -- works without library open (Phase 6) */}
-              {settings.featureFlags.camerasTab && onNavigateToCameras && (
-                <button
-                  className="library-action-button"
-                  onClick={onNavigateToCameras}
-                  disabled={isLoading}
-                  title="Manage camera profiles and devices"
-                >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="2" y="6" width="20" height="12" rx="2" />
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M17 6V4h-4" />
-                  </svg>
-                  <span>Cameras</span>
-                </button>
-              )}
             </section>
 
             {/* Empty state */}
