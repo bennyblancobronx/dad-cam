@@ -11,6 +11,7 @@ use crate::db::app_schema;
 use crate::db::app_db;
 use crate::camera;
 use crate::constants;
+use crate::jobs::worker::WorkerState;
 use super::DbState;
 
 /// Library info returned to frontend
@@ -28,7 +29,7 @@ pub struct LibraryResponse {
 
 /// Open an existing library
 #[tauri::command]
-pub fn open_library(state: State<DbState>, path: String) -> Result<LibraryResponse, String> {
+pub fn open_library(state: State<DbState>, worker: State<WorkerState>, path: String) -> Result<LibraryResponse, String> {
     let library_path = PathBuf::from(&path);
     let db_path = get_db_path(&library_path);
 
@@ -63,6 +64,10 @@ pub fn open_library(state: State<DbState>, path: String) -> Result<LibraryRespon
     // Store library root path (not connection -- spec 3.4)
     let mut db = state.0.lock().map_err(|e| e.to_string())?;
     *db = Some(library_path.clone());
+    drop(db);
+
+    // Notify background job worker that a library is open
+    worker.set_library(library_path);
 
     Ok(LibraryResponse {
         id: lib.id,
@@ -77,15 +82,19 @@ pub fn open_library(state: State<DbState>, path: String) -> Result<LibraryRespon
 
 /// Close the current library
 #[tauri::command]
-pub fn close_library(state: State<DbState>) -> Result<(), String> {
+pub fn close_library(state: State<DbState>, worker: State<WorkerState>) -> Result<(), String> {
     let mut db = state.0.lock().map_err(|e| e.to_string())?;
     *db = None;
+    drop(db);
+
+    // Tell background job worker to go idle
+    worker.clear_library();
     Ok(())
 }
 
 /// Create a new library
 #[tauri::command]
-pub fn create_library(state: State<DbState>, path: String, name: String) -> Result<LibraryResponse, String> {
+pub fn create_library(state: State<DbState>, worker: State<WorkerState>, path: String, name: String) -> Result<LibraryResponse, String> {
     let library_path = PathBuf::from(&path);
 
     // Validate the path exists and is a directory
@@ -130,6 +139,10 @@ pub fn create_library(state: State<DbState>, path: String, name: String) -> Resu
     // Store library root path (not connection -- spec 3.4)
     let mut db = state.0.lock().map_err(|e| format!("Failed to acquire db lock: {}", e))?;
     *db = Some(library_path.clone());
+    drop(db);
+
+    // Notify background job worker that a library is open
+    worker.set_library(library_path);
 
     Ok(LibraryResponse {
         id: lib.id,

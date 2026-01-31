@@ -177,6 +177,54 @@ pub fn count_pending_jobs(conn: &Connection) -> Result<Vec<(String, i64)>> {
     Ok(counts)
 }
 
+/// Load transform_rules from a camera profile in App DB.
+/// Returns (deinterlace override, lut path). Both None = use auto-detect.
+fn load_profile_transform_rules(
+    profile_type: Option<&str>,
+    profile_ref: Option<&str>,
+) -> (Option<bool>, Option<String>) {
+    let (ptype, pref) = match (profile_type, profile_ref) {
+        (Some(t), Some(r)) => (t, r),
+        _ => return (None, None),
+    };
+
+    let app_conn = match crate::db::app_db::open_app_db_connection() {
+        Ok(c) => c,
+        Err(_) => return (None, None),
+    };
+
+    let transform_json: Option<String> = match ptype {
+        "bundled" => {
+            crate::db::app_schema::get_bundled_profile(&app_conn, pref)
+                .ok()
+                .flatten()
+                .map(|p| p.transform_rules)
+        }
+        "user" => {
+            crate::db::app_schema::get_user_profile(&app_conn, pref)
+                .ok()
+                .flatten()
+                .map(|p| p.transform_rules)
+        }
+        _ => None,
+    };
+
+    let json_str = match transform_json {
+        Some(s) => s,
+        None => return (None, None),
+    };
+
+    let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(_) => return (None, None),
+    };
+
+    let deinterlace = parsed.get("deinterlace").and_then(|v| v.as_bool());
+    let lut = parsed.get("lut").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    (deinterlace, lut)
+}
+
 /// Run a proxy generation job
 fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path, app: Option<&AppHandle>) -> Result<()> {
     let clip_id = job.clip_id
@@ -199,18 +247,29 @@ fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
     emit_progress_opt(app, &JobProgress::new(&job_id_str, "proxy", 0, 1)
         .with_message(format!("Generating proxy for clip {}", clip_id)));
 
-    // Determine parameters based on media type
-    let deinterlace = if clip.media_type == "video" {
+    // Load transform_rules from camera profile (App DB)
+    let (profile_deinterlace, profile_lut) = load_profile_transform_rules(
+        clip.camera_profile_type.as_deref(),
+        clip.camera_profile_ref.as_deref(),
+    );
+
+    // Deinterlace: profile override > auto-detect
+    let deinterlace = if let Some(di) = profile_deinterlace {
+        di
+    } else if clip.media_type == "video" {
         let meta = crate::metadata::ffprobe::probe(&source_path)?;
         preview::proxy::needs_deinterlace(&meta)
     } else {
         false
     };
 
+    // LUT: from profile if set
+    let lut_path = profile_lut;
+
     // Create derived params (include camera_profile_id and source hash for invalidation)
     let params = preview::DerivedParams::for_proxy(
         deinterlace,
-        None, // No LUT for now
+        None, // LUT asset ID -- profile LUT applied via ProxyOptions.lut_path
         clip.camera_profile_id,
         original.hash_fast.clone(),
     );
@@ -238,7 +297,7 @@ fn run_proxy_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
         let options = preview::proxy::ProxyOptions {
             deinterlace,
             target_fps: 30,
-            lut_path: None,
+            lut_path,
         };
         preview::proxy::generate_proxy(&source_path, &output_path, &options)
             .map_err(|e| DadCamError::FFmpeg(e.to_string()))?;

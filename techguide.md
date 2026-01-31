@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.149
+Version: 0.1.150
 
 ---
 
@@ -213,6 +213,17 @@ Job types:
 
 Jobs are durable, resumable, and crash-safe.
 
+Background Job Worker:
+- A single background thread spawns at app startup and lives for the app lifetime
+- When a library is open, polls for pending jobs every 5 seconds
+- After processing one job, drains remaining jobs without delay
+- When no library is open (or library closed), the thread sleeps and does nothing
+- Opens short-lived DB connections per job (contract #22)
+- Catches panics per job so the thread never dies
+- Emits job-progress events to frontend via AppHandle
+- WorkerState (Arc<Mutex<Option<PathBuf>>>) is managed Tauri state alongside DbState
+- open_library/close_library/create_library update WorkerState to wake or idle the worker
+
 ---
 
 Camera Profiles
@@ -293,10 +304,13 @@ ffmpeg -i input.mts \
 ```
 
 Features:
-- Auto-deinterlace for interlaced sources (yadif filter)
+- Camera profile-aware: reads transform_rules from clip's camera profile (App DB)
+- Profile deinterlace override takes priority over auto-detect heuristic
+- Profile LUT path passed to ffmpeg if set in transform_rules
+- Generic-fallback has empty transform_rules, so auto-detect still kicks in
+- Auto-deinterlace for interlaced sources (yadif filter) when no profile override
 - Scale to 720p height, maintain aspect ratio
 - Constant 30fps for smooth playback
-- Optional LUT application for preview look
 - Audio-only clips get m4a proxy
 
 See docs/planning/phase-2.md for implementation details
@@ -541,6 +555,7 @@ Frontend Stack:
 
 Tauri Command Layer:
 - DbState: Stores library path in Mutex<Option<PathBuf>> (not a connection -- see contract #22)
+- WorkerState: Arc<Mutex<Option<PathBuf>>> shared with background job worker thread
 - Each command opens short-lived connections via DbState::connect()
 - Commands: open_library, close_library, get_clips, get_clip, toggle_tag, set_tag
 - Phase 7 Commands: validate_reference_path, create_reference_library, create_batch_ingest, get_batch_progress, start_relink_scan, get_relink_candidates, apply_relink_candidate, get_offline_clips, list_codec_presets, create_codec_preset, get_clip_volume_info

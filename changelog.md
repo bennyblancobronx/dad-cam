@@ -4,6 +4,13 @@ This is the source of truth for version number.
 
 ---
 
+0.1.150 -- Background job worker + camera profile-aware proxy generation
+
+- Added jobs/worker.rs: background thread that polls for pending jobs (thumb/proxy/sprite/hash_full/score) every 5s when a library is open. After processing one job, drains the queue without delay. Goes idle when no library is open.
+- Wired worker into app startup (lib.rs setup) and library open/close (library.rs). WorkerState is managed Tauri state alongside DbState.
+- Proxy generation now reads transform_rules from the clip's camera profile (App DB). Profile deinterlace override takes priority over auto-detect; profile LUT path is passed to ffmpeg. Generic-fallback has empty transform_rules so auto-detect still kicks in.
+- No new dependencies. Uses existing run_next_job(), open_library_db_connection(), and App DB profile lookup functions.
+
 0.1.149 -- Remove dead camera profile loading paths + deprecated sidecar code
 
 - Deleted canonical.json (empty) and camera/bundled.rs (loaded from it). The real profiles are in bundled_profiles.json loaded into App DB at startup -- canonical.json was a leftover from the old Library DB path.

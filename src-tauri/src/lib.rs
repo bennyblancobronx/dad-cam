@@ -17,7 +17,7 @@ pub mod commands;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use serde::{Deserialize, Serialize};
 
 use db::{open_db, get_db_path};
@@ -369,8 +369,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(DbState(Mutex::new(None)))
+        .manage(jobs::worker::WorkerState::new())
         .setup(|app| {
             migrate_tauri_store_to_app_db(app);
+            // Spawn background job worker thread
+            let worker_state: tauri::State<jobs::worker::WorkerState> = app.state();
+            let library_arc = worker_state.library_arc();
+            jobs::worker::spawn_worker(app.handle().clone(), library_arc);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
