@@ -24,6 +24,9 @@ pub struct CameraProfileView {
     pub version: i32,
     pub match_rules: String,
     pub transform_rules: String,
+    pub is_system: bool,
+    pub deletable: bool,
+    pub category: Option<String>,
 }
 
 /// List all camera profiles (bundled + user) from App DB.
@@ -38,6 +41,7 @@ pub fn list_camera_profiles() -> Result<Vec<CameraProfileView>, String> {
     let mut views: Vec<CameraProfileView> = Vec::with_capacity(bundled.len() + user.len());
 
     for p in bundled {
+        let is_system = p.slug == "generic-fallback";
         views.push(CameraProfileView {
             profile_type: "bundled".to_string(),
             profile_ref: p.slug,
@@ -45,6 +49,9 @@ pub fn list_camera_profiles() -> Result<Vec<CameraProfileView>, String> {
             version: p.version,
             match_rules: p.match_rules,
             transform_rules: p.transform_rules,
+            is_system,
+            deletable: !is_system,
+            category: None,
         });
     }
 
@@ -56,6 +63,9 @@ pub fn list_camera_profiles() -> Result<Vec<CameraProfileView>, String> {
             version: p.version,
             match_rules: p.match_rules,
             transform_rules: p.transform_rules,
+            is_system: false,
+            deletable: true,
+            category: None,
         });
     }
 

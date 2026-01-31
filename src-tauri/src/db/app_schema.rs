@@ -283,6 +283,12 @@ pub struct BundledProfileJsonEntry {
     pub match_rules: serde_json::Value,
     #[serde(default = "default_json_obj")]
     pub transform_rules: serde_json::Value,
+    /// System profile flag (JSON-file-only, not stored in DB). See G6.
+    pub is_system: Option<bool>,
+    /// Whether the profile can be deleted (JSON-file-only, not stored in DB). See G6.
+    pub deletable: Option<bool>,
+    /// Display category for UI grouping (JSON-file-only, not stored in DB). See G6.
+    pub category: Option<String>,
 }
 
 fn default_version() -> i32 { 1 }
@@ -1913,6 +1919,9 @@ mod tests {
             version: 1,
             match_rules: serde_json::json!({}),
             transform_rules: serde_json::json!({}),
+            is_system: None,
+            deletable: None,
+            category: None,
         }];
         sync_bundled_profiles(&app_conn, &entries).unwrap();
 

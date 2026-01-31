@@ -4,6 +4,13 @@ This is the source of truth for version number.
 
 ---
 
+0.1.146 -- Add is_system/deletable/category to camera profile structs
+
+- BundledProfileJsonEntry now deserializes is_system, deletable, category from bundled_profiles.json (previously silently dropped)
+- CameraProfileView sends is_system, deletable, category to frontend for UI controls (disable delete on system profile, display categories)
+- generic-fallback profile identified as is_system=true, deletable=false at runtime by slug
+- Completes metadata-plan.md G6 gap -- 100% of plan items now implemented
+
 0.1.145 -- Dead code cleanup + version fix
 
 - Removed 22 unused Rust constants (worker defaults, descriptive strings, sampling/timeout params)
