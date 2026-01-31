@@ -4,6 +4,24 @@ This is the source of truth for version number.
 
 ---
 
+0.1.153 -- Repo cleanup: remove dead planning docs, harden gitignore
+
+- Deleted 21 obsolete planning docs (phase-0 through phase-9, importplan, libraryfix, metadata-plan, sidecar-importplan, v0.2.0 plans, dashboard-redesign, pro-register-camera). Only docs/planning/checklist.md remains as the active release checklist.
+- Added .gitignore entries for dev/test artifacts: .playwright-mcp/, .swarm/, test-library/, test-video.mp4, src-tauri/binaries/. None were tracked -- this prevents accidental commits.
+- Cleaned stale "See docs/planning/" cross-references in techguide.md that pointed to the now-deleted files.
+
+0.1.152 -- Crash recovery + session completion tracking
+
+- On library open, clips stuck in transient metadata states (extracting/matching) are reset to pending so the background worker retries them. Prevents clips from being stuck forever after a crash.
+- After each clip reaches a terminal metadata state (verified or extraction_failed), the ingest session's metadata_complete_at is set if all clips in that session are done. Previously the column existed but was never written.
+
+0.1.151 -- Distribution prep: version sync, exiftool bundling, fresh-install defaults
+
+- Synced version to 0.1.150 in tauri.conf.json, Cargo.toml, and package.json (were 0.1.132/128/124).
+- Added exiftool as Tauri externalBin sidecar. New scripts/download-exiftool.sh downloads platform-appropriate exiftool and places it in src-tauri/binaries/ with Tauri's target-triple naming. Placeholder sidecar included for dev mode.
+- Added ensure_exiftool() in tools.rs with clear error message when missing. Called at startup (non-fatal warning).
+- App DB fresh-install hardening: seeds default settings (ui_mode=simple, first_run_completed=false, theme=system) on first run. Improved permission error messages for ~/.dadcam/ directory creation.
+
 0.1.150 -- Background job worker + camera profile-aware proxy generation
 
 - Added jobs/worker.rs: background thread that polls for pending jobs (thumb/proxy/sprite/hash_full/score) every 5s when a library is open. After processing one job, drains the queue without delay. Goes idle when no library is open.

@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.150
+Version: 0.1.153
 
 ---
 
@@ -75,7 +75,6 @@ Reference mode: originals stay in their original location, only .dadcam/ is crea
 Dual Database Architecture (Library Fix)
 
 Dad Cam uses two SQLite databases with distinct responsibilities.
-See docs/planning/libraryfix.md for the full spec.
 See contracts.md #19-22 for the architectural contracts.
 
 App DB (`~/.dadcam/app.db`):
@@ -187,8 +186,6 @@ Phase 8 - ML and Intelligence:
 Database Schema
 
 (Populated in Phase 1)
-
-See docs/planning/phase-0.md for logical schema design.
 
 ---
 
@@ -313,7 +310,6 @@ Features:
 - Constant 30fps for smooth playback
 - Audio-only clips get m4a proxy
 
-See docs/planning/phase-2.md for implementation details
 
 ---
 
@@ -334,7 +330,6 @@ Features:
 - Quality setting from THUMB_QUALITY constant
 - Handles images as well as video
 
-See docs/planning/phase-2.md for implementation details
 
 ---
 
@@ -361,7 +356,6 @@ Features:
 - CSS/JS calculates tile position from hover percentage
 - Only generated for video clips (not audio/images)
 
-See docs/planning/phase-2.md for implementation details
 
 ---
 
@@ -434,7 +428,6 @@ CLI commands:
 
 Invalidation: Scores regenerate when pipeline_version or scoring_version changes.
 
-See docs/planning/phase-4.md for implementation details
 
 ---
 
@@ -488,7 +481,6 @@ Reproducibility:
 - Exact FFmpeg command logged
 - Re-render produces identical output
 
-See docs/planning/phase-5.md for implementation details
 
 ---
 
@@ -540,7 +532,6 @@ Events:
 - export-progress: Real-time progress updates
 - export-cancel: Cancel signal from UI
 
-See docs/planning/phase-6.md for implementation details.
 
 ---
 
@@ -604,7 +595,6 @@ Sprite Scrubbing:
 - Update CSS background-position (no network calls)
 - Progress bar shows current position
 
-See docs/planning/phase-3.md for implementation details.
 
 ---
 
@@ -672,7 +662,6 @@ UI Components:
 - BatchProgress: Progress bar with status, completed/failed counts
 - VolumeBadge: Small badge showing source volume (network icon for NAS)
 
-See docs/planning/phase-7.md for implementation details.
 
 ---
 
@@ -752,7 +741,6 @@ Error Handling:
 - Resume support: Interrupted analyses can be completed later
 - User messages: Technical errors mapped to friendly descriptions
 
-See docs/planning/phase-8.md for implementation details.
 
 ---
 
@@ -933,7 +921,6 @@ Camera System (Library Fix)
 
 Camera profiles and devices live in App DB (survive library deletion).
 Cameras UI is a section inside Settings (Advanced mode, gated by camerasTab feature flag). Works with no library open.
-See docs/planning/libraryfix.md for full spec.
 
 Matching Priority (spec 7.2):
 1. Registered device match (USB fingerprint -> device UUID -> assigned profile)
@@ -1049,7 +1036,6 @@ Sidecar Files:
 Import Verification (Gold Standard)
 
 Bulletproof import pipeline ensuring every byte is verified before source deletion is allowed.
-See docs/planning/importplan.md for the full specification.
 
 Pipeline (per file):
 1. Discover: Walk source, filter video extensions, record file stats
@@ -1110,7 +1096,7 @@ Tauri Commands:
 
 Sidecar Import Verification (Gold Standard)
 
-Sidecar files (THM, XML, XMP, SRT, LRF, IDX) follow the exact same gold-standard import pipeline as primary media files. Implemented in v0.1.129-0.1.131 per docs/planning/sidecar-importplan.md.
+Sidecar files (THM, XML, XMP, SRT, LRF, IDX) follow the exact same gold-standard import pipeline as primary media files. Implemented in v0.1.129-0.1.131.
 
 See Contract #7: "Sidecars travel with their parent video."
 

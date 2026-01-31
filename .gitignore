@@ -59,3 +59,14 @@ coverage/
 *.tmp
 *.temp
 *.bak
+
+# Dev tooling artifacts
+.playwright-mcp/
+.swarm/
+
+# Test data (local only)
+test-library/
+test-video.mp4
+
+# Sidecar binaries (built/downloaded, not committed)
+src-tauri/binaries/
