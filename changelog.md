@@ -4,6 +4,13 @@ This is the source of truth for version number.
 
 ---
 
+0.1.149 -- Remove dead camera profile loading paths + deprecated sidecar code
+
+- Deleted canonical.json (empty) and camera/bundled.rs (loaded from it). The real profiles are in bundled_profiles.json loaded into App DB at startup -- canonical.json was a leftover from the old Library DB path.
+- Removed insert_default_profiles() which hard-coded 3 untested placeholder profiles (Sony Handycam, Canon DSLR, Panasonic MiniDV) into Library DB on every create/open. These were missed in the v0.1.147 placeholder cleanup. The matching engine uses App DB profiles, not these.
+- Removed deprecated ingest_sidecar() from sidecar_processor.rs (was already #[allow(dead_code)]). process_sidecar_entry() is the gold-standard replacement since Migration 10.
+- No behavior changes. The matching engine already used the App DB path (bundled_profiles.json -> sync_bundled_profiles_at_startup -> App DB bundled_profiles table).
+
 0.1.148 -- Fix migration 11 FK constraint failure on existing libraries
 
 - Migration 11 (jobs table recreation) failed with "FOREIGN KEY constraint failed" on existing DBs because FK checks were ON during the table swap. Fixed by adding PRAGMA defer_foreign_keys=ON + explicit BEGIN/COMMIT around the swap, and DROP TABLE IF EXISTS jobs_new for idempotency.

@@ -50,9 +50,6 @@ pub fn open_library(state: State<DbState>, path: String) -> Result<LibraryRespon
         let _ = app_schema::mark_opened(&app_conn, &library_uuid);
     }
 
-    // Auto-load bundled camera profiles (silently skips if not found)
-    camera::bundled::auto_load_bundled_profiles(&conn);
-
     // Load custom camera devices from ~/.dadcam/custom_cameras.json (cross-library portable store)
     camera::devices::load_devices_from_json(&conn);
 
@@ -118,13 +115,6 @@ pub fn create_library(state: State<DbState>, path: String, name: String) -> Resu
         let _ = app_schema::upsert_library(&app_conn, &library_uuid, &path, Some(&name));
         let _ = app_schema::mark_opened(&app_conn, &library_uuid);
     }
-
-    // Insert default camera profiles
-    camera::insert_default_profiles(&conn)
-        .map_err(|e| format!("Failed to insert camera profiles: {}", e))?;
-
-    // Auto-load bundled camera profiles from canonical.json
-    camera::bundled::auto_load_bundled_profiles(&conn);
 
     // Load custom camera devices from ~/.dadcam/custom_cameras.json
     camera::devices::load_devices_from_json(&conn);

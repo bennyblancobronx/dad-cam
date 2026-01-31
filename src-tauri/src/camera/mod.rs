@@ -2,7 +2,6 @@
 
 pub mod devices;
 pub mod matcher;
-pub mod bundled;
 pub mod registration;
 
 use rusqlite::Connection;
@@ -217,64 +216,3 @@ pub fn insert_profile(conn: &Connection, profile: &CameraProfile) -> Result<i64>
     Ok(conn.last_insert_rowid())
 }
 
-/// Insert default camera profiles
-pub fn insert_default_profiles(conn: &Connection) -> Result<()> {
-    let profiles = vec![
-        CameraProfile {
-            id: 0,
-            name: "Sony Handycam (AVCHD)".to_string(),
-            version: 1,
-            match_rules: MatchRules {
-                make: Some(vec!["Sony".to_string()]),
-                codec: Some(vec!["h264".to_string()]),
-                folder_pattern: Some(r"AVCHD|BDMV".to_string()),
-                ..Default::default()
-            },
-            transform_rules: TransformRules {
-                deinterlace: Some(true),
-                deinterlace_mode: Some("yadif".to_string()),
-                ..Default::default()
-            },
-        },
-        CameraProfile {
-            id: 0,
-            name: "Canon DSLR".to_string(),
-            version: 1,
-            match_rules: MatchRules {
-                make: Some(vec!["Canon".to_string()]),
-                codec: Some(vec!["h264".to_string()]),
-                ..Default::default()
-            },
-            transform_rules: TransformRules::default(),
-        },
-        CameraProfile {
-            id: 0,
-            name: "Panasonic MiniDV".to_string(),
-            version: 1,
-            match_rules: MatchRules {
-                make: Some(vec!["Panasonic".to_string()]),
-                codec: Some(vec!["dvvideo".to_string(), "dv".to_string()]),
-                ..Default::default()
-            },
-            transform_rules: TransformRules {
-                deinterlace: Some(true),
-                ..Default::default()
-            },
-        },
-    ];
-
-    for profile in profiles {
-        // Check if profile already exists
-        let exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM camera_profiles WHERE name = ?1)",
-            [&profile.name],
-            |row| row.get(0),
-        )?;
-
-        if !exists {
-            insert_profile(conn, &profile)?;
-        }
-    }
-
-    Ok(())
-}

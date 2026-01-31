@@ -259,9 +259,6 @@ fn cmd_init(path: PathBuf, name: Option<String>) -> Result<()> {
     // Open/create database
     let conn = open_db(&db_path)?;
 
-    // Insert default camera profiles
-    camera::insert_default_profiles(&conn)?;
-
     // Create library record
     let lib_name = name.unwrap_or_else(|| {
         library_root
