@@ -37,11 +37,6 @@ pub fn get_db_path(library_root: &Path) -> std::path::PathBuf {
         .join(DB_FILENAME)
 }
 
-/// Get the .dadcam folder path for a library root
-pub fn get_dadcam_path(library_root: &Path) -> std::path::PathBuf {
-    library_root.join(DADCAM_FOLDER)
-}
-
 /// Open a library DB, run all migrations, ensure library_meta/UUID exists,
 /// and backfill stable camera refs for clips with legacy integer IDs (spec 6.2).
 /// Call once when opening or creating a library. Returns (Connection, library_uuid).

@@ -7,10 +7,6 @@ export function setLibraryRoot(path: string): void {
   libraryRoot = path;
 }
 
-export function getLibraryRoot(): string | null {
-  return libraryRoot;
-}
-
 /**
  * Convert a relative path from the database to an absolute file:// URL
  * that can be used in <img> and <video> src attributes.
@@ -23,14 +19,6 @@ export function toAssetUrl(relativePath: string | null): string | null {
 
   // Convert to Tauri asset URL
   return convertFileSrc(absolutePath);
-}
-
-/**
- * Convert relative path to absolute filesystem path
- */
-export function toAbsolutePath(relativePath: string | null): string | null {
-  if (!relativePath || !libraryRoot) return null;
-  return `${libraryRoot}/${relativePath}`;
 }
 
 /**

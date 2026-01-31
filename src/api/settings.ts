@@ -20,12 +20,6 @@ export async function saveAppSettings(settings: AppSettings): Promise<void> {
   await invoke('save_app_settings', { settings });
 }
 
-/** Get current mode */
-export async function getMode(): Promise<AppMode> {
-  const mode = await invoke<string>('get_mode');
-  return mode as AppMode;
-}
-
 /** Set mode */
 export async function setMode(mode: AppMode): Promise<void> {
   await invoke('set_mode', { mode });

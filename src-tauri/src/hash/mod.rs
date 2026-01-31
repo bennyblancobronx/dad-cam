@@ -71,25 +71,6 @@ pub fn compute_full_hash_from_bytes(data: &[u8]) -> String {
     format!("blake3:full:{}", hash.to_hex())
 }
 
-/// Compute full BLAKE3 hash by streaming from a reader without loading
-/// the entire content into memory. Returns "blake3:full:<hex>".
-pub fn compute_full_hash_streaming(reader: &mut impl Read) -> Result<String> {
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = vec![0u8; HASH_CHUNK_SIZE];
-
-    loop {
-        let bytes_read = reader.read(&mut buffer)
-            .map_err(|e| DadCamError::Hash(format!("Failed to read: {}", e)))?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-
-    let hash = hasher.finalize();
-    Ok(format!("blake3:full:{}", hash.to_hex()))
-}
-
 /// Verify a file matches its stored hash
 pub fn verify_hash(path: &Path, expected_hash: &str) -> Result<bool> {
     let actual_hash = if expected_hash.contains(HASH_FAST_SCHEME) {

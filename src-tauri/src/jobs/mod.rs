@@ -168,23 +168,6 @@ pub fn claim_job(conn: &Connection, job_type: Option<&str>) -> Result<Option<Job
     }
 }
 
-/// Renew the lease on a job (heartbeat)
-pub fn heartbeat_job(conn: &Connection, job_id: i64, run_token: &str) -> Result<bool> {
-    let lease_expires = Utc::now()
-        .checked_add_signed(chrono::Duration::seconds(JOB_LEASE_DURATION_SECONDS))
-        .unwrap()
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
-
-    let rows = conn.execute(
-        "UPDATE jobs SET heartbeat_at = datetime('now'), lease_expires_at = ?1
-         WHERE id = ?2 AND run_token = ?3 AND status = 'running'",
-        rusqlite::params![lease_expires, job_id, run_token],
-    )?;
-
-    Ok(rows > 0)
-}
-
 /// Complete a job successfully
 pub fn complete_job(conn: &Connection, job_id: i64, run_token: &str) -> Result<bool> {
     let rows = conn.execute(

@@ -16,9 +16,6 @@ pub enum DadCamError {
     #[error("Library not found: {0}")]
     LibraryNotFound(String),
 
-    #[error("Library already exists: {0}")]
-    LibraryExists(String),
-
     #[error("Clip not found: {0}")]
     ClipNotFound(i64),
 
@@ -49,26 +46,11 @@ pub enum DadCamError {
     #[error("File not found: {0}")]
     FileNotFound(String),
 
-    #[error("Duplicate file: {0}")]
-    DuplicateFile(String),
-
-    #[error("Unsupported format: {0}")]
-    UnsupportedFormat(String),
-
-    #[error("Configuration error: {0}")]
-    Config(String),
-
     #[error("{0}")]
     Other(String),
 
-    #[error("Scoring error: {0}")]
-    Scoring(String),
-
     #[error("Not found: {0}")]
     NotFound(String),
-
-    #[error("Event not found: {0}")]
-    EventNotFound(i64),
 
     #[error("License error: {0}")]
     License(String),

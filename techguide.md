@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.144
+Version: 0.1.145
 
 ---
 

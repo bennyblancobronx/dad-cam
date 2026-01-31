@@ -4,6 +4,15 @@ This is the source of truth for version number.
 
 ---
 
+0.1.145 -- Dead code cleanup + version fix
+
+- Removed 22 unused Rust constants (worker defaults, descriptive strings, sampling/timeout params)
+- Removed 6 unused error variants (LibraryExists, UnsupportedFormat, DuplicateFile, Config, Scoring, EventNotFound)
+- Removed 3 dead Rust functions (get_dadcam_path, compute_full_hash_streaming, heartbeat_job)
+- Removed 2 dead TS functions (paths.ts:getLibraryRoot, toAbsolutePath), 1 dead API function (settings.ts:getMode)
+- Removed 2 dead TS constants (APP_NAME, APP_DESCRIPTION)
+- Fixed APP_VERSION displaying stale 0.1.128 instead of current version
+
 0.1.144 -- Metadata plan Steps 2-11: Gold-standard metadata framework complete
 
 - Step 2: Full exiftool dump (-j -G -n), ffprobe extended fields, FullExtractionResult struct, raw dumps stored in sidecars

@@ -5,20 +5,10 @@ pub const PIPELINE_VERSION: u32 = 1;
 pub const DEFAULT_INGEST_MODE: &str = "copy";
 
 // Hashing
-pub const HASH_ALGORITHM: &str = "blake3";
 pub const HASH_CHUNK_SIZE: usize = 1_048_576; // 1MB
 pub const HASH_FAST_SCHEME: &str = "first_last_size_v1";
 
-// Concurrency defaults
-pub const DEFAULT_INGEST_WORKERS: usize = 1;
-pub const DEFAULT_PREVIEW_WORKERS: usize = 1;
-pub const DEFAULT_SCORE_WORKERS: usize = 1;
-pub const DEFAULT_EXPORT_WORKERS: usize = 1;
-pub const DEFAULT_ML_WORKERS: usize = 1;
-pub const MAX_CONCURRENT_FFMPEG: usize = 2;
-
 // Paths
-pub const PATH_DB_SEPARATOR: char = '/';
 pub const DADCAM_FOLDER: &str = ".dadcam";
 pub const DB_FILENAME: &str = "dadcam.db";
 pub const APP_DB_DIR: &str = ".dadcam";
@@ -32,7 +22,6 @@ pub const SIDECARS_FOLDER: &str = "sidecars";
 
 // Time
 pub const EVENT_TIME_GAP_HOURS: i64 = 4;
-pub const TIMESTAMP_PRECEDENCE: [&str; 3] = ["metadata", "folder", "filesystem"];
 
 // Proxy settings (used in Phase 2, defined here for schema)
 pub const PROXY_CODEC: &str = "h264";
@@ -50,7 +39,6 @@ pub const SPRITE_MAX_FRAMES: u32 = 600;      // Overall cap (10 minutes @ 1fps)
 pub const SPRITE_PAGE_COLS: u32 = 60;        // Frames per sprite sheet page
 
 // Camera profiles
-pub const CAMERA_PROFILE_FORMAT: &str = "json";
 pub const CAMERA_MATCH_MIN_CONFIDENCE: f64 = 0.5;
 
 // Metadata pipeline (gold-standard framework)
@@ -63,19 +51,10 @@ pub const MATCH_SCORE_THRESHOLD: f64 = 3.0;
 /// Maximum possible specificity score (make+model 5 + codec+container 3 + folder 3 + resolution 2 + fps 1).
 pub const MATCH_MAX_SCORE: f64 = 14.0;
 
-// Storage semantics
-pub const RECORDED_AT_STORAGE: &str = "utc";
-pub const DERIVED_PARAMS_HASH_ALGO: &str = "blake3";
-
-// Format handling
-pub const SUPPORTED_FORMATS: &str = "ffmpeg-native";
-pub const OUTLIER_TYPES: [&str; 2] = ["audio", "image"];
-
 // Job settings
 pub const JOB_MAX_RETRIES: i32 = 3;
 pub const JOB_BASE_BACKOFF_SECONDS: i64 = 60;
 pub const JOB_LEASE_DURATION_SECONDS: i64 = 300; // 5 minutes
-pub const JOB_HEARTBEAT_INTERVAL_SECONDS: i64 = 30;
 
 // Ingest copy settings
 pub const COPY_CHUNK_SIZE: usize = 1_048_576; // 1MB streaming chunk
@@ -119,15 +98,6 @@ pub const SHARPNESS_SHARP_THRESHOLD: f64 = 500.0;  // Above this is sharp
 // Motion detection thresholds
 pub const MOTION_LOW_THRESHOLD: f64 = 0.01;   // Below this is static
 pub const MOTION_HIGH_THRESHOLD: f64 = 0.3;   // Above this is high motion
-
-// Sampling parameters (for efficient analysis)
-pub const SCORE_SAMPLE_FRAMES: u32 = 10;      // Frames to sample per clip
-pub const SCORE_SAMPLE_DURATION_MS: i64 = 500; // Sample every N ms for audio
-
-// Scoring job concurrency and timeouts
-pub const SCORE_JOB_TIMEOUT_SECS: u64 = 300;      // 5 minutes max per job
-pub const SCORE_ANALYZE_TIMEOUT_SECS: u64 = 60;   // 1 minute max per analyzer
-pub const SCORE_MAX_CONCURRENT_JOBS: usize = 2;   // Max parallel scoring jobs
 
 // ----- Stable Reason Tokens -----
 // Use these for machine-parseable reasons. Format: R_<CATEGORY>_<DETAIL>
