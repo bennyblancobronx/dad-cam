@@ -3,6 +3,7 @@
 pub mod devices;
 pub mod matcher;
 pub mod bundled;
+pub mod registration;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,10 @@ pub struct TransformRules {
     pub deinterlace_mode: Option<String>,
     pub color_space: Option<String>,
     pub lut: Option<String>,
+    /// true=apply rotation correction, false=skip, None=auto-detect from metadata
+    pub rotation_fix: Option<bool>,
+    /// "tff", "bff", "auto", or None=auto-detect from ffprobe field_order
+    pub field_order: Option<String>,
 }
 
 /// Match result with confidence score

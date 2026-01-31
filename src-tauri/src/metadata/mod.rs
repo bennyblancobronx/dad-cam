@@ -37,36 +37,79 @@ pub struct MediaMetadata {
     pub media_type: String,
 }
 
-/// Extract metadata from a media file
-pub fn extract_metadata(path: &Path) -> Result<MediaMetadata> {
-    // Try ffprobe first
-    let ffprobe_meta = ffprobe::probe(path)?;
+/// Full extraction result including raw dumps for sidecar storage.
+pub struct FullExtractionResult {
+    pub metadata: MediaMetadata,
+    pub raw_exif_dump: serde_json::Value,
+    pub raw_ffprobe_dump: serde_json::Value,
+    pub exif_extended: exiftool::ExifExtendedMetadata,
+    pub ffprobe_extended: ffprobe::FFprobeExtendedFields,
+    pub exiftool_success: bool,
+    pub exiftool_exit_code: i32,
+    pub exiftool_error: Option<String>,
+    pub ffprobe_success: bool,
+    pub ffprobe_exit_code: i32,
+    pub ffprobe_error: Option<String>,
+}
 
-    // Try exiftool for additional camera metadata
-    let exif_meta = exiftool::extract(path).ok();
+/// Extract metadata from a media file with full raw dumps (gold-standard).
+pub fn extract_metadata_full(path: &Path) -> Result<FullExtractionResult> {
+    // Run ffprobe (full dump mode)
+    let ffprobe_result = ffprobe::probe_full(path)?;
 
-    // Merge results
-    let mut meta = ffprobe_meta;
+    // Run exiftool (full dump mode) -- non-fatal if it fails
+    let exif_result = exiftool::extract_full(path);
 
-    if let Some(exif) = exif_meta {
-        // Prefer exiftool dates (more reliable for camera files)
-        if meta.recorded_at.is_none() && exif.recorded_at.is_some() {
-            meta.recorded_at = exif.recorded_at;
-            meta.recorded_at_source = Some("exiftool".to_string());
-        }
-        // Add camera info
-        if meta.camera_make.is_none() {
-            meta.camera_make = exif.camera_make;
-        }
-        if meta.camera_model.is_none() {
-            meta.camera_model = exif.camera_model;
-        }
-        if meta.serial_number.is_none() {
-            meta.serial_number = exif.serial_number;
+    let mut meta = ffprobe_result.metadata;
+
+    // Merge exiftool data
+    if let Ok(ref exif) = exif_result {
+        if exif.success {
+            // Prefer exiftool dates (more reliable for camera files)
+            if meta.recorded_at.is_none() && exif.parsed.recorded_at.is_some() {
+                meta.recorded_at = exif.parsed.recorded_at.clone();
+                meta.recorded_at_source = Some("exiftool".to_string());
+            }
+            if meta.camera_make.is_none() {
+                meta.camera_make = exif.parsed.camera_make.clone();
+            }
+            if meta.camera_model.is_none() {
+                meta.camera_model = exif.parsed.camera_model.clone();
+            }
+            if meta.serial_number.is_none() {
+                meta.serial_number = exif.parsed.serial_number.clone();
+            }
         }
     }
 
-    Ok(meta)
+    let (exif_dump, exif_ext, exif_ok, exif_code, exif_err) = match exif_result {
+        Ok(r) => (r.raw_dump, r.extended, r.success, r.exit_code, r.error),
+        Err(e) => (
+            serde_json::Value::Null,
+            exiftool::ExifExtendedMetadata::default(),
+            false, -1, Some(e.to_string()),
+        ),
+    };
+
+    Ok(FullExtractionResult {
+        metadata: meta,
+        raw_exif_dump: exif_dump,
+        raw_ffprobe_dump: ffprobe_result.raw_dump,
+        exif_extended: exif_ext,
+        ffprobe_extended: ffprobe_result.extended,
+        exiftool_success: exif_ok,
+        exiftool_exit_code: exif_code,
+        exiftool_error: exif_err,
+        ffprobe_success: ffprobe_result.success,
+        ffprobe_exit_code: ffprobe_result.exit_code,
+        ffprobe_error: ffprobe_result.error,
+    })
+}
+
+/// Backward-compatible: extract metadata without raw dumps.
+pub fn extract_metadata(path: &Path) -> Result<MediaMetadata> {
+    let result = extract_metadata_full(path)?;
+    Ok(result.metadata)
 }
 
 /// Determine media type from file extension
@@ -90,17 +133,14 @@ pub fn detect_media_type(path: &Path) -> String {
 
 /// Try to parse timestamp from folder name (e.g., "2019-07-04" or "20190704")
 pub fn parse_folder_date(folder_name: &str) -> Option<String> {
-    // Try YYYY-MM-DD format
     if let Ok(date) = chrono::NaiveDate::parse_from_str(folder_name, "%Y-%m-%d") {
         return Some(format!("{}T00:00:00Z", date));
     }
 
-    // Try YYYYMMDD format
     if let Ok(date) = chrono::NaiveDate::parse_from_str(folder_name, "%Y%m%d") {
         return Some(format!("{}T00:00:00Z", date));
     }
 
-    // Try to extract date from folder name like "2019-07-04 Birthday"
     let date_regex = regex::Regex::new(r"(\d{4})-(\d{2})-(\d{2})").ok()?;
     if let Some(caps) = date_regex.captures(folder_name) {
         let year = caps.get(1)?.as_str();

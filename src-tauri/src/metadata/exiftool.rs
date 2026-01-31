@@ -15,95 +15,198 @@ pub struct ExifMetadata {
     pub gps_longitude: Option<f64>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ExifToolOutput {
-    #[serde(rename = "DateTimeOriginal")]
-    date_time_original: Option<String>,
-    #[serde(rename = "CreateDate")]
-    create_date: Option<String>,
-    #[serde(rename = "MediaCreateDate")]
-    media_create_date: Option<String>,
-    #[serde(rename = "Make")]
-    make: Option<String>,
-    #[serde(rename = "Model")]
-    model: Option<String>,
-    #[serde(rename = "SerialNumber")]
-    serial_number: Option<String>,
-    #[serde(rename = "InternalSerialNumber")]
-    internal_serial_number: Option<String>,
-    #[serde(rename = "GPSLatitude")]
-    gps_latitude: Option<String>,
-    #[serde(rename = "GPSLongitude")]
-    gps_longitude: Option<String>,
+/// Extended metadata parsed from the full exiftool dump (sidecar-only, not DB).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExifExtendedMetadata {
+    pub sensor_type: Option<String>,
+    pub focal_length: Option<f64>,
+    pub focal_length_35mm: Option<f64>,
+    pub scale_factor: Option<f64>,
+    pub native_width: Option<i32>,
+    pub native_height: Option<i32>,
+    pub bits_per_sample: Option<i32>,
+    pub color_space: Option<String>,
+    pub white_balance: Option<String>,
+    pub lens_model: Option<String>,
+    pub lens_id: Option<String>,
+    pub megapixels: Option<f64>,
+    pub rotation: Option<f64>,
+    pub compressor_id: Option<String>,
 }
 
-/// Run exiftool on a file and extract metadata
-pub fn extract(path: &Path) -> Result<ExifMetadata> {
+/// Result of a full exiftool extraction: raw dump + parsed fields.
+pub struct ExifFullResult {
+    pub raw_dump: serde_json::Value,
+    pub parsed: ExifMetadata,
+    pub extended: ExifExtendedMetadata,
+    pub success: bool,
+    pub exit_code: i32,
+    pub error: Option<String>,
+}
+
+/// Run exiftool in full dump mode (-j -G -n) and return raw JSON + parsed fields.
+pub fn extract_full(path: &Path) -> Result<ExifFullResult> {
     let output = Command::new(crate::tools::exiftool_path())
-        .args([
-            "-j",
-            "-DateTimeOriginal",
-            "-CreateDate",
-            "-MediaCreateDate",
-            "-Make",
-            "-Model",
-            "-SerialNumber",
-            "-InternalSerialNumber",
-            "-GPSLatitude",
-            "-GPSLongitude",
-        ])
+        .args(["-j", "-G", "-n"])
         .arg(path)
         .output()
         .map_err(|e| DadCamError::ExifTool(format!("Failed to run exiftool: {}", e)))?;
 
+    let exit_code = output.status.code().unwrap_or(-1);
+
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(DadCamError::ExifTool(format!("exiftool failed: {}", stderr)));
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Ok(ExifFullResult {
+            raw_dump: serde_json::Value::Null,
+            parsed: ExifMetadata::default(),
+            extended: ExifExtendedMetadata::default(),
+            success: false,
+            exit_code,
+            error: Some(stderr),
+        });
     }
 
-    let exif_output: Vec<ExifToolOutput> = serde_json::from_slice(&output.stdout)
-        .map_err(|e| DadCamError::ExifTool(format!("Failed to parse exiftool output: {}", e)))?;
+    let raw_array: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| DadCamError::ExifTool(format!("Failed to parse exiftool JSON: {}", e)))?;
 
-    let exif = exif_output.into_iter().next().unwrap_or_default();
+    // exiftool returns an array; take the first element
+    let raw_dump = raw_array.as_array()
+        .and_then(|a| a.first())
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
+    let parsed = parse_core_fields(&raw_dump);
+    let extended = parse_extended_fields(&raw_dump);
+
+    Ok(ExifFullResult {
+        raw_dump,
+        parsed,
+        extended,
+        success: true,
+        exit_code,
+        error: None,
+    })
+}
+
+/// Backward-compatible: run exiftool and return just the parsed core fields.
+pub fn extract(path: &Path) -> Result<ExifMetadata> {
+    let result = extract_full(path)?;
+    if !result.success {
+        return Err(DadCamError::ExifTool(
+            result.error.unwrap_or_else(|| "exiftool failed".to_string()),
+        ));
+    }
+    Ok(result.parsed)
+}
+
+/// Parse core fields from the full -G -n dump.
+/// With -G, tags are prefixed: "EXIF:Make", "QuickTime:CreateDate", etc.
+/// With -n, numeric values are raw (GPS as decimal, focal as float).
+fn parse_core_fields(dump: &serde_json::Value) -> ExifMetadata {
     let mut meta = ExifMetadata::default();
 
-    // Extract date (prefer DateTimeOriginal, then CreateDate, then MediaCreateDate)
-    let raw_date = exif.date_time_original
-        .or(exif.create_date)
-        .or(exif.media_create_date);
+    // Date: prefer EXIF group over QuickTime
+    let date = get_grouped_string(dump, "DateTimeOriginal")
+        .or_else(|| get_grouped_string(dump, "CreateDate"))
+        .or_else(|| get_grouped_string(dump, "MediaCreateDate"));
+    meta.recorded_at = date.and_then(|d| parse_exif_date(&d));
 
-    meta.recorded_at = raw_date.and_then(|d| parse_exif_date(&d));
-    meta.camera_make = exif.make;
-    meta.camera_model = exif.model;
-    meta.serial_number = exif.serial_number.or(exif.internal_serial_number);
+    // Camera
+    meta.camera_make = get_grouped_string(dump, "Make");
+    meta.camera_model = get_grouped_string(dump, "Model");
 
-    // Parse GPS if available
-    if let Some(lat_str) = exif.gps_latitude {
-        meta.gps_latitude = parse_gps_coord(&lat_str);
+    // Serial: priority chain
+    meta.serial_number = get_grouped_string(dump, "SerialNumber")
+        .or_else(|| get_grouped_string(dump, "InternalSerialNumber"));
+
+    // GPS: with -n flag, values are already decimal
+    meta.gps_latitude = get_grouped_number(dump, "GPSLatitude");
+    meta.gps_longitude = get_grouped_number(dump, "GPSLongitude");
+
+    meta
+}
+
+/// Parse extended fields from the full dump (sidecar-only).
+fn parse_extended_fields(dump: &serde_json::Value) -> ExifExtendedMetadata {
+    let mut ext = ExifExtendedMetadata::default();
+
+    ext.sensor_type = get_grouped_string(dump, "ImageSensorType");
+    ext.focal_length = get_grouped_number(dump, "FocalLength");
+    ext.focal_length_35mm = get_grouped_number(dump, "FocalLengthIn35mmFormat");
+    ext.scale_factor = get_grouped_number(dump, "ScaleFactor35efl");
+    ext.native_width = get_grouped_number(dump, "ExifImageWidth").map(|v| v as i32);
+    ext.native_height = get_grouped_number(dump, "ExifImageHeight").map(|v| v as i32);
+    ext.bits_per_sample = get_grouped_number(dump, "BitsPerSample").map(|v| v as i32);
+    ext.color_space = get_grouped_string(dump, "ColorSpace");
+    ext.white_balance = get_grouped_string(dump, "WhiteBalance");
+    ext.lens_model = get_grouped_string(dump, "LensModel");
+    ext.lens_id = get_grouped_string(dump, "LensID");
+    ext.megapixels = get_grouped_number(dump, "Megapixels");
+    ext.rotation = get_grouped_number(dump, "Rotation");
+    ext.compressor_id = get_grouped_string(dump, "CompressorID");
+
+    ext
+}
+
+/// Get a string value from a grouped exiftool dump.
+/// With -G flag, keys are "Group:TagName". We search for any group containing the tag.
+fn get_grouped_string(dump: &serde_json::Value, tag: &str) -> Option<String> {
+    let obj = dump.as_object()?;
+    // Prefer EXIF group, then any group
+    let exif_key = format!("EXIF:{}", tag);
+    if let Some(val) = obj.get(&exif_key).and_then(|v| value_to_string(v)) {
+        return Some(val);
     }
-    if let Some(lon_str) = exif.gps_longitude {
-        meta.gps_longitude = parse_gps_coord(&lon_str);
+    // Search all groups
+    for (key, val) in obj {
+        if key.ends_with(&format!(":{}", tag)) || key == tag {
+            if let Some(s) = value_to_string(val) {
+                return Some(s);
+            }
+        }
     }
+    None
+}
 
-    Ok(meta)
+/// Get a numeric value from a grouped exiftool dump.
+fn get_grouped_number(dump: &serde_json::Value, tag: &str) -> Option<f64> {
+    let obj = dump.as_object()?;
+    let exif_key = format!("EXIF:{}", tag);
+    if let Some(val) = obj.get(&exif_key).and_then(|v| v.as_f64()) {
+        return Some(val);
+    }
+    for (key, val) in obj {
+        if key.ends_with(&format!(":{}", tag)) || key == tag {
+            if let Some(n) = val.as_f64() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Convert a JSON value to string (handles both string and numeric values).
+fn value_to_string(val: &serde_json::Value) -> Option<String> {
+    match val {
+        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 /// Parse exiftool date format to ISO8601
-/// Input: "2019:07:04 12:30:45" or similar
-/// Output: "2019-07-04T12:30:45Z"
 fn parse_exif_date(date_str: &str) -> Option<String> {
-    // Handle "YYYY:MM:DD HH:MM:SS" format
     let normalized = date_str
         .replace(':', "-")
-        .replacen("-", ":", 2); // Restore time colons
+        .replacen("-", ":", 2);
 
-    // Try parsing with chrono
-    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(&normalized.replace(" ", "T"), "%Y-%m-%dT%H:%M:%S") {
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(
+        &normalized.replace(' ', "T"), "%Y-%m-%dT%H:%M:%S",
+    ) {
         return Some(format!("{}Z", dt.format("%Y-%m-%dT%H:%M:%S")));
     }
 
-    // Try alternate format
     let parts: Vec<&str> = date_str.split_whitespace().collect();
     if parts.len() >= 2 {
         let date_part = parts[0].replace(':', "-");
@@ -114,50 +217,7 @@ fn parse_exif_date(date_str: &str) -> Option<String> {
     None
 }
 
-/// Parse GPS coordinate string to decimal degrees
-fn parse_gps_coord(coord_str: &str) -> Option<f64> {
-    // ExifTool may return "34 deg 3' 30.00" N" format
-    // or already decimal like "34.0583"
-
-    // Try direct parse first
-    if let Ok(val) = coord_str.parse::<f64>() {
-        return Some(val);
-    }
-
-    // Try DMS format: capture degrees, minutes, seconds, and optional direction
-    let re = regex::Regex::new(r#"(\d+)\s*(?:deg|°)\s*(\d+)'\s*([\d.]+)"?\s*([NSEW])?"#).ok()?;
-    let caps = re.captures(coord_str)?;
-
-    let deg: f64 = caps.get(1)?.as_str().parse().ok()?;
-    let min: f64 = caps.get(2)?.as_str().parse().ok()?;
-    let sec: f64 = caps.get(3)?.as_str().parse().ok()?;
-    let dir = caps.get(4).map(|m| m.as_str()).unwrap_or("N");
-
-    let mut decimal = deg + min / 60.0 + sec / 3600.0;
-    if dir == "S" || dir == "W" {
-        decimal = -decimal;
-    }
-
-    Some(decimal)
-}
-
 /// Check if exiftool is available
 pub fn is_available() -> bool {
     crate::tools::is_tool_available("exiftool")
-}
-
-impl Default for ExifToolOutput {
-    fn default() -> Self {
-        Self {
-            date_time_original: None,
-            create_date: None,
-            media_create_date: None,
-            make: None,
-            model: None,
-            serial_number: None,
-            internal_serial_number: None,
-            gps_latitude: None,
-            gps_longitude: None,
-        }
-    }
 }

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use crate::error::{DadCamError, Result};
 use crate::metadata::MediaMetadata;
 
@@ -22,6 +22,16 @@ struct FFprobeStream {
     channels: Option<i32>,
     sample_rate: Option<String>,
     duration: Option<String>,
+    // Extended fields (layer 0 raw dump capture)
+    field_order: Option<String>,
+    bits_per_raw_sample: Option<String>,
+    color_space: Option<String>,
+    color_primaries: Option<String>,
+    color_transfer: Option<String>,
+    display_aspect_ratio: Option<String>,
+    sample_aspect_ratio: Option<String>,
+    profile: Option<String>,
+    level: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,8 +47,33 @@ struct FFprobeTags {
     creation_time: Option<String>,
 }
 
-/// Run ffprobe on a file and extract metadata
-pub fn probe(path: &Path) -> Result<MediaMetadata> {
+/// Extended video fields parsed from ffprobe (sidecar-only, not DB).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FFprobeExtendedFields {
+    pub field_order: Option<String>,
+    pub bits_per_raw_sample: Option<String>,
+    pub color_space: Option<String>,
+    pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
+    pub display_aspect_ratio: Option<String>,
+    pub sample_aspect_ratio: Option<String>,
+    pub codec_profile: Option<String>,
+    pub codec_level: Option<i32>,
+}
+
+/// Result of a full ffprobe extraction: raw dump + parsed fields.
+pub struct FFprobeFullResult {
+    pub raw_dump: serde_json::Value,
+    pub metadata: MediaMetadata,
+    pub extended: FFprobeExtendedFields,
+    pub success: bool,
+    pub exit_code: i32,
+    pub error: Option<String>,
+}
+
+/// Run ffprobe in full dump mode and return raw JSON + parsed fields.
+pub fn probe_full(path: &Path) -> Result<FFprobeFullResult> {
     let output = Command::new(crate::tools::ffprobe_path())
         .args([
             "-v", "quiet",
@@ -50,15 +85,30 @@ pub fn probe(path: &Path) -> Result<MediaMetadata> {
         .output()
         .map_err(|e| DadCamError::FFprobe(format!("Failed to run ffprobe: {}", e)))?;
 
+    let exit_code = output.status.code().unwrap_or(-1);
+
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(DadCamError::FFprobe(format!("ffprobe failed: {}", stderr)));
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Ok(FFprobeFullResult {
+            raw_dump: serde_json::Value::Null,
+            metadata: MediaMetadata::default(),
+            extended: FFprobeExtendedFields::default(),
+            success: false,
+            exit_code,
+            error: Some(stderr),
+        });
     }
 
+    // Capture raw JSON for sidecar storage
+    let raw_dump: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| DadCamError::FFprobe(format!("Failed to parse ffprobe JSON: {}", e)))?;
+
+    // Also parse into typed struct for field extraction
     let probe_output: FFprobeOutput = serde_json::from_slice(&output.stdout)
         .map_err(|e| DadCamError::FFprobe(format!("Failed to parse ffprobe output: {}", e)))?;
 
     let mut meta = MediaMetadata::default();
+    let mut extended = FFprobeExtendedFields::default();
 
     // Extract video stream info
     if let Some(ref streams) = probe_output.streams {
@@ -73,6 +123,17 @@ pub fn probe(path: &Path) -> Result<MediaMetadata> {
                         meta.duration_ms = parse_duration_ms(stream.duration.as_deref());
                     }
                     meta.media_type = "video".to_string();
+
+                    // Extended fields
+                    extended.field_order = stream.field_order.clone();
+                    extended.bits_per_raw_sample = stream.bits_per_raw_sample.clone();
+                    extended.color_space = stream.color_space.clone();
+                    extended.color_primaries = stream.color_primaries.clone();
+                    extended.color_transfer = stream.color_transfer.clone();
+                    extended.display_aspect_ratio = stream.display_aspect_ratio.clone();
+                    extended.sample_aspect_ratio = stream.sample_aspect_ratio.clone();
+                    extended.codec_profile = stream.profile.clone();
+                    extended.codec_level = stream.level;
                 }
                 Some("audio") => {
                     meta.audio_codec = stream.codec_name.clone();
@@ -96,7 +157,6 @@ pub fn probe(path: &Path) -> Result<MediaMetadata> {
         meta.bitrate = format.bit_rate.as_ref().and_then(|s| s.parse().ok());
         meta.container = format.format_name.clone();
 
-        // Try to get creation time from format tags
         if let Some(ref tags) = format.tags {
             if let Some(ref creation_time) = tags.creation_time {
                 meta.recorded_at = Some(creation_time.clone());
@@ -105,12 +165,29 @@ pub fn probe(path: &Path) -> Result<MediaMetadata> {
         }
     }
 
-    // Default media type if not set
     if meta.media_type.is_empty() {
         meta.media_type = super::detect_media_type(path);
     }
 
-    Ok(meta)
+    Ok(FFprobeFullResult {
+        raw_dump,
+        metadata: meta,
+        extended,
+        success: true,
+        exit_code,
+        error: None,
+    })
+}
+
+/// Backward-compatible: run ffprobe and return just parsed metadata.
+pub fn probe(path: &Path) -> Result<MediaMetadata> {
+    let result = probe_full(path)?;
+    if !result.success {
+        return Err(DadCamError::FFprobe(
+            result.error.unwrap_or_else(|| "ffprobe failed".to_string()),
+        ));
+    }
+    Ok(result.metadata)
 }
 
 /// Parse frame rate string like "30000/1001" to f64

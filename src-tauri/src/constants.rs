@@ -53,6 +53,16 @@ pub const SPRITE_PAGE_COLS: u32 = 60;        // Frames per sprite sheet page
 pub const CAMERA_PROFILE_FORMAT: &str = "json";
 pub const CAMERA_MATCH_MIN_CONFIDENCE: f64 = 0.5;
 
+// Metadata pipeline (gold-standard framework)
+/// Bump when extraction logic changes (e.g., switching to full exiftool dump).
+pub const METADATA_PIPELINE_VERSION: u32 = 2;
+/// Bump when matching algorithm changes (reject rules, scoring, threshold).
+pub const MATCHER_VERSION: u32 = 2;
+/// Minimum raw specificity score for a profile to beat generic-fallback.
+pub const MATCH_SCORE_THRESHOLD: f64 = 3.0;
+/// Maximum possible specificity score (make+model 5 + codec+container 3 + folder 3 + resolution 2 + fps 1).
+pub const MATCH_MAX_SCORE: f64 = 14.0;
+
 // Storage semantics
 pub const RECORDED_AT_STORAGE: &str = "utc";
 pub const DERIVED_PARAMS_HASH_ALGO: &str = "blake3";

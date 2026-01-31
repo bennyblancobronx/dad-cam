@@ -2,6 +2,9 @@
 
 pub mod runner;
 pub mod progress;
+pub mod rematch;
+pub mod reextract;
+pub mod profile_update;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

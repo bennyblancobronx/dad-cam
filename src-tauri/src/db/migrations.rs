@@ -421,6 +421,52 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_manifest_entry_type ON ingest_manifest_entries(entry_type);
     CREATE INDEX idx_manifest_parent ON ingest_manifest_entries(parent_entry_id);
     "#,
+
+    // Migration 11: Metadata extraction state machine (metadata-plan.md Layer 6)
+    // Tracks per-clip extraction + matching pipeline state for crash recovery.
+    // Existing clips backfilled as 'verified' (they have metadata from the old pipeline).
+    // Also expands jobs table to support rematch/reextract job types by recreating
+    // with the updated CHECK constraint.
+    r#"
+    ALTER TABLE clips ADD COLUMN metadata_status TEXT
+        CHECK (metadata_status IN ('pending','extracting','extracted','matching','matched','verified','extraction_failed'))
+        DEFAULT 'verified';
+
+    ALTER TABLE ingest_sessions ADD COLUMN metadata_complete_at TEXT;
+
+    CREATE INDEX idx_clips_metadata_status ON clips(metadata_status);
+
+    -- Recreate jobs table with expanded type CHECK to include rematch + reextract.
+    -- This preserves all existing data.
+    CREATE TABLE jobs_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK (type IN ('ingest', 'proxy', 'thumb', 'sprite', 'export', 'hash_full', 'score', 'ml', 'batch_ingest', 'batch_export', 'relink_scan', 'rematch', 'reextract')),
+        status TEXT NOT NULL DEFAULT 'pending'
+            CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+        library_id INTEGER REFERENCES libraries(id),
+        clip_id INTEGER REFERENCES clips(id),
+        asset_id INTEGER REFERENCES assets(id),
+        priority INTEGER NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        progress INTEGER DEFAULT 0,
+        payload TEXT DEFAULT '{}',
+        claimed_by TEXT,
+        run_token TEXT,
+        lease_expires_at TEXT,
+        heartbeat_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        started_at TEXT,
+        completed_at TEXT
+    );
+    INSERT INTO jobs_new SELECT * FROM jobs;
+    DROP TABLE jobs;
+    ALTER TABLE jobs_new RENAME TO jobs;
+
+    CREATE INDEX idx_jobs_status ON jobs(status);
+    CREATE INDEX idx_jobs_type_status ON jobs(type, status);
+    CREATE INDEX idx_jobs_library ON jobs(library_id);
+    "#,
 ];
 
 /// Get current schema version from database

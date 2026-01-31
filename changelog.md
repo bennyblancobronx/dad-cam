@@ -4,6 +4,109 @@ This is the source of truth for version number.
 
 ---
 
+0.1.144 -- Metadata plan Steps 2-11: Gold-standard metadata framework complete
+
+- Step 2: Full exiftool dump (-j -G -n), ffprobe extended fields, FullExtractionResult struct, raw dumps stored in sidecars
+- Step 3: Migration 11 adds metadata_status to clips, metadata_complete_at to ingest_sessions, expands jobs CHECK for rematch/reextract
+- Step 4: Three-phase matching (reject rules, weighted scoring, threshold 3.0), full audit trail in sidecar matchAudit section
+- Step 5: Expanded bundled_profiles.json from 4 to 10 profiles (iPhone H.264/HEVC, Canon VIXIA, Panasonic HC-V, DV Tape, GoPro)
+- Step 6: rematch.rs -- re-match generic-fallback clips using stored inputSignature (no file access needed)
+- Step 7: reextract.rs -- re-extract metadata when pipeline_version changes (requires file access)
+- Step 8: registration.rs -- discover_sample_files(), probe_device_sample(), store device EXIF dumps at ~/.dadcam/device_dumps/
+- Step 9: Forward flow verified -- matching already propagates device profile_type/profile_ref to clips
+- Step 10: backflow_scan_for_device() -- auto-assign serial/USB matches, suggest make+model matches (G12)
+- Step 11: profile_update.rs -- rematch_on_profile_change(), check_unassigned_devices() for profile add/update backflow
+
+0.1.143 -- Split ingest/mod.rs (1824 lines) into 7 modules, all under 400 lines. Pure refactor, no behavior changes.
+
+0.1.142 -- Metadata plan Step 1: generic-fallback profile + atomic sidecar writes
+
+- Added generic-fallback profile to bundled_profiles.json (first entry, empty match_rules, auto-detect transforms)
+- Changed fallback in resolve_profile_from_app_db() from ('none','') to ('bundled','generic-fallback') -- every clip now always has a profile
+- Changed fallback in resolve_stable_refs_fallback() to match
+- Replaced std::fs::write() in sidecar writer with atomic temp-fsync-rename pattern (temp file, fsync, rename, dir sync)
+- Round-trip JSON validation before writing to prevent corrupt sidecars
+
+0.1.141 -- Fix step 3 migration default in metadata-plan.json (said 'pending', should be 'verified' for backfill)
+
+0.1.140 -- Metadata plan audit: aligned 3 minor deltas between .md and .json
+
+- Reference mode: .md now matches .json detail (import pipeline enforces safe-to-wipe gate, re-extraction matches copy-mode behavior when originals deleted, sidecars clarified as not source-device files)
+- State machine: added transition_diagram field to .json states section (matches .md ASCII diagram)
+- Completeness gate: confirmed identical content, no change needed
+
+0.1.139 -- Metadata plan v3.2 sync: fixed 5 stale references where correction sections didn't update original text
+
+- Step 3 migration scope: removed media_type (already exists from migration 1) in both .md and .json
+- Layer 0 ffprobe failure: changed "extraction_partial" to "extracted with partial data" per G2 in both docs
+- JSON B5 proxy invalidation: aligned with G13 (pipeline_version=0, no file deletion)
+- Layer 6 media_type CHECK: removed 'unknown' from DB constraint in both docs (sidecar stores it instead)
+- Added "Backflow on Manual Re-match" subsection to .md Layer 4 (was in .json but missing from .md)
+
+0.1.138 -- Metadata plan v3.2: corrected 14 implementation gaps found by auditing .md vs .json vs actual codebase
+
+- G1: pipeline_version already exists on assets table -- defined constant-based lifecycle for re-extraction
+- G2: removed phantom extraction_partial state -- partial data = extracted, both fail = extraction_failed
+- G3: added score-to-confidence formula: min(score / 14.0, 0.95) with worked examples
+- G4-G5: added rotation_fix and field_order to TransformRules struct (Step 2)
+- G6: clarified is_system/deletable/category are JSON-file-only, not DB columns
+- G7: defined error detail storage in sidecar extractionStatus section
+- G8: defined MATCHER_VERSION constant (1=current, 2=after reject rules in Step 4)
+- G9: specified concurrent extraction safety (state machine prevents double-extract, 4-clip parallel limit)
+- G10: defined metadata_complete_at trigger (event-driven after each clip terminal state)
+- G11: added discover_sample_files() to Step 8 scope with algorithm
+- G12: clarified soft device matches (make+model) are suggestions only, not auto-applied
+- G13: defined proxy invalidation via existing assets.pipeline_version=0 (no file deletion)
+- G14: clarified sensor object is JSON-file-only display metadata
+- Corrected migration 11: media_type already exists from migration 1, removed from migration 11
+
+0.1.137 -- Converted metadata-plan.json into metadata-plan.md implementation guide for less experienced developers
+
+- Full markdown conversion of the v3.1 metadata/camera profile framework plan
+- Structured with table of contents, clear headings, tables, and code blocks
+- Audited against source JSON: 100% coverage confirmed (all 8 layers, 11 steps, 8 corrections, 7 principles)
+
+0.1.136 -- Metadata plan v3.1: closed 3 cross-cutting gaps between metadata plan and ship gate checklist
+
+- Added import_pipeline_linkage to layer 7: documents that app-generated sidecars are destination-side (not source manifest entries) and clarifies the boundary with import-side sidecar tracking (ship gate A3)
+- Added relationship_to_safe_to_wipe to layer 6 completeness gate: metadata_complete_at is NOT a prerequisite for SAFE TO WIPE -- bytes are safe regardless of parse status
+- Added reference_mode section to layer 6: extraction/matching pipeline works identically on referenced files, sidecar writes are unaffected, re-extraction requires mounted drive
+
+0.1.135 -- Metadata plan v3.1: added outlier media handling (contract #4 coverage for audio-only + image files)
+
+- Added layer 0b: extraction/parsing/matching/proxy behavior for audio-only, image, and unknown file types
+- Added media_type column to migration 11 (video/audio/image/unknown)
+- Closes the one gap between contracts.md #4 and the metadata plan
+
+0.1.134 -- Ship gate: added multi-session, disk-full, post-wipe, timezone, and filesystem-awareness tests
+
+- Added A7.2: disk-full mid-import graceful failure
+- Added A11.5: timezone storage requirement (no naive local time)
+- Added A2.3: filesystem-specific atomic rename documentation
+- Tightened A10.3: specifies default audio track for multi-track sources
+- Tightened B4.3: test data must match actual fast-hash window parameters
+- Added B13: multi-session isolation (same card re-import, two-card back-to-back)
+- Added B14: disk-full during import end-to-end (6 checks)
+- Added B15: post-wipe failure awareness (dest loss after wipe, wipe report persistence)
+- Moved B12.5 hover scrubbing to C2 (SHOULD PASS -- depends on sprite sheet pipeline)
+- Renumbered C sections for consistency
+
+0.1.133 -- Ship gate checklist hardened: 6 new test sections, outlier media, device yank, post-ingest playback
+
+- Added A1.6-A1.8: audio-only, image, and unrecognized-extension files must be discovered (contract #3, #4)
+- Added A2.5: dedup false-positive safety net (fast hash match but full hash mismatch must still copy)
+- Added A9: device disconnection handling (6 checks -- detection, error codes, clear messaging, no false SAFE)
+- Added A10: post-ingest playback gate (proxy + thumbnail auto-queue, playable output after import)
+- Added A11: timestamp correctness (embedded > folder name > filesystem, source stored in DB)
+- Added B4.3: dedup false-positive end-to-end test scenario
+- Added B10: device yank mid-import end-to-end (6 checks including re-import after reconnect)
+- Added B11: outlier media types end-to-end (audio + image files through full pipeline)
+- Added B12: post-ingest playback end-to-end ("can I watch my stuff" test)
+- Added C1.4-C1.5: device disconnect UX + import summary total file count
+- Added C5: dual DB integrity test (library delete/move preserves App DB data)
+- Test dataset now requires audio-only file and image file in addition to existing requirements
+- Strengthened scope statement: "every file on the card is accounted for"
+
 0.1.132 -- Docs sync: sidecar import audit 49/49, techguide updated
 
 - Full audit of sidecar-importplan.md against codebase: 49/49 checklist items confirmed done

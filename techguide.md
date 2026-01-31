@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.132
+Version: 0.1.144
 
 ---
 
@@ -208,6 +208,8 @@ Job types:
 - batch_export: Render multiple export recipes sequentially (Phase 7)
 - relink_scan: Scan path and match against offline clips (Phase 7)
 - ml_analysis: Run ML analysis on clip (face, emotion, speech, motion) (Phase 8)
+- rematch: Re-match generic-fallback clips using stored inputSignature (no file access)
+- reextract: Re-run exiftool+ffprobe on clips when pipeline_version changes (requires file access)
 
 Jobs are durable, resumable, and crash-safe.
 
@@ -243,10 +245,31 @@ Full hash (background job):
 
 ---
 
-Metadata Extraction
+Metadata Extraction (Gold Standard)
 
-ffprobe: codec, resolution, duration, fps, audio streams
-exiftool: dates, camera make/model, GPS (if present)
+Two-tool extraction pipeline. Raw dumps are immutable evidence stored in sidecars.
+
+exiftool (full dump mode):
+- Flags: `-j -G -n` (JSON, grouped tags, numeric values)
+- Core fields: recorded_at, camera_make, camera_model, serial_number
+- Extended fields (sidecar only): sensor_type, focal_length, rotation, compressor_id, gps, lens_model, etc.
+- Group-aware parsing: prefers EXIF group over QuickTime group for same tag
+
+ffprobe (extended mode):
+- Core fields: codec, resolution, duration, fps, audio streams, bitrate, container
+- Extended fields (sidecar only): field_order, color_space, color_primaries, color_transfer, display_aspect_ratio, codec profile/level
+
+Raw dumps stored in sidecar `rawExifDump` and `rawFfprobe` sections. When we need a field we didn't think of today, it's already in the dump.
+
+Metadata state machine (clips.metadata_status):
+- pending -> extracting -> extracted -> matching -> matched -> verified
+- extraction_failed: both tools failed (clip still imported, has filename + size)
+- No `extraction_partial` state. Partial data (one tool ok, one failed) = `extracted`
+
+Pipeline versioning:
+- METADATA_PIPELINE_VERSION (constants.rs): bump when extraction logic changes
+- MATCHER_VERSION (constants.rs): bump when matching algorithm changes
+- Re-extraction triggered when asset pipeline_version < METADATA_PIPELINE_VERSION
 
 Timestamp precedence:
 1. Embedded metadata
@@ -906,15 +929,29 @@ Matching Priority (spec 7.2):
 Match Rules (spec 7.3):
 - JSON object: keys are ANDed, arrays within keys are ORed
 - Supported keys: make, model, codec, container, folderPattern (regex), resolution constraints, frameRate, scanType
+- Reject rules: rejectCodec, rejectContainer, rejectModel (negative filters, checked first)
 - String compares case-insensitive
+
+Three-Phase Matching:
+1. Reject: Check reject rules first. If any reject rule matches, profile is eliminated.
+2. Score: Weighted specificity scoring (make+model=5, folderPattern=3, codec+container=3, resolution=2, frameRate=1). Max score = 14.
+3. Threshold: Minimum score of 3.0 required to beat generic-fallback. Confidence = min(score / 14.0, 0.95).
+
+Match Audit Trail:
+- Every matching decision stored in sidecar `matchAudit` section
+- Records: inputSignature (frozen metadata snapshot), all candidates with scores, reject reasons, matched/failed rules, winner with confidence
+- matcherVersion tracks which algorithm produced the result
+- matchSource: registered_device_usb, registered_device_serial, bundled_profile, user_profile, generic_fallback
+- Enables re-matching without file access (uses stored inputSignature)
 
 Tie-break (spec 7.4):
 1. Higher version
-2. Higher specificity score (make+model=5, folderPattern=3, codec+container=3, resolution=2, frameRate=1)
+2. Higher specificity score
 3. Stable sort by profile_ref (deterministic)
 
 Bundled Profiles:
-- Source: resources/cameras/bundled_profiles.json (shipped with app)
+- Source: resources/cameras/bundled_profiles.json (shipped with app, 10 profiles)
+- Profiles: generic-fallback, sony-handycam-avchd, iphone-h264, iphone-hevc, canon-dslr, canon-vixia-hf, panasonic-hc-v-series, panasonic-minidv, dv-tape-generic, gopro-hero-h264
 - App DB table: bundled_profiles (slug = stable ID)
 - sync_bundled_profiles() does full replace at startup (idempotent)
 
@@ -928,6 +965,24 @@ Camera Devices:
 - All USB detection wrapped in catch_unwind (best-effort, never blocks user)
 - Root hubs filtered, fingerprints deduplicated
 - Gated by licensing (camera_registration feature)
+
+Device Registration Probing:
+- discover_sample_files(mount_point): finds 1-3 video files from known camera dirs (DCIM, AVCHD, M4ROOT) or root walk (depth 3)
+- probe_device_sample(): runs full exiftool+ffprobe on sample, auto-matches profile, stores dump at ~/.dadcam/device_dumps/<uuid>.json
+- Device dump is the immutable EXIF baseline for the physical camera
+
+Backflow on Device Registration:
+- After registration, scans all unassigned clips for matches
+- Serial number match: auto-assigned (confidence 0.95)
+- USB fingerprint via ingest session: auto-assigned (confidence 0.90)
+- Make+model match: returned as suggestion only, NOT auto-applied (user confirms)
+- Profile upgrade: if device has profile and clip is generic-fallback, upgrades clip profile
+- Proxy invalidation: pipeline_version = 0 when profile changes (G13)
+
+Backflow on Profile Add/Update:
+- Re-matches generic-fallback clips using stored inputSignature (no file access)
+- Re-checks devices with profile_type='none' against new profiles using stored EXIF dumps
+- Queues rematch job for each library
 
 Stable Clip References:
 - Clips store: camera_profile_type, camera_profile_ref, camera_device_uuid
@@ -966,6 +1021,8 @@ Features:
 Sidecar Files:
 - Written to .dadcam/sidecars/<clip_id>.json during ingest
 - Schema v0.2.0: MetadataSnapshot, CameraMatchSnapshot, IngestTimestamps, DerivedAssetPaths
+- Gold-standard additions: rawExifDump, rawFfprobe, extractionStatus, extendedMetadata, matchAudit
+- Atomic writes: temp file + fsync + rename (no corrupt sidecars on crash)
 
 ---
 

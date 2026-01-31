@@ -1,12 +1,84 @@
 [
   {
+    "slug": "generic-fallback",
+    "name": "Unknown Camera",
+    "version": 1,
+    "is_system": true,
+    "deletable": false,
+    "category": "system",
+    "matchRules": {},
+    "transformRules": {
+      "deinterlace": null,
+      "deinterlaceMode": "yadif",
+      "colorSpace": null,
+      "lut": null
+    }
+  },
+  {
     "slug": "sony-handycam-avchd",
     "name": "Sony Handycam (AVCHD)",
-    "version": 1,
+    "version": 2,
+    "category": "camcorder",
     "matchRules": {
       "make": ["Sony"],
       "codec": ["h264"],
-      "folderPattern": "AVCHD|BDMV"
+      "folderPattern": "AVCHD|BDMV",
+      "rejectContainer": ["3gp"],
+      "rejectModel": ["iPhone", "Xperia"]
+    },
+    "transformRules": {
+      "deinterlace": true,
+      "deinterlaceMode": "yadif",
+      "fieldOrder": "tff"
+    }
+  },
+  {
+    "slug": "iphone-h264",
+    "name": "iPhone (H.264)",
+    "version": 1,
+    "category": "phone",
+    "matchRules": {
+      "make": ["Apple"],
+      "codec": ["h264"],
+      "container": ["mov", "mp4"],
+      "rejectCodec": ["hevc", "hvc1"]
+    },
+    "transformRules": {}
+  },
+  {
+    "slug": "iphone-hevc",
+    "name": "iPhone (HEVC)",
+    "version": 1,
+    "category": "phone",
+    "matchRules": {
+      "make": ["Apple"],
+      "codec": ["hevc", "hvc1"],
+      "container": ["mov", "mp4"]
+    },
+    "transformRules": {}
+  },
+  {
+    "slug": "canon-dslr",
+    "name": "Canon DSLR",
+    "version": 2,
+    "category": "dslr",
+    "matchRules": {
+      "make": ["Canon"],
+      "codec": ["h264"],
+      "rejectContainer": ["3gp"],
+      "rejectModel": ["VIXIA", "LEGRIA", "iVIS"]
+    },
+    "transformRules": {}
+  },
+  {
+    "slug": "canon-vixia-hf",
+    "name": "Canon VIXIA HF",
+    "version": 1,
+    "category": "camcorder",
+    "matchRules": {
+      "make": ["Canon"],
+      "model": ["VIXIA", "LEGRIA", "iVIS"],
+      "codec": ["h264"]
     },
     "transformRules": {
       "deinterlace": true,
@@ -14,25 +86,60 @@
     }
   },
   {
-    "slug": "canon-dslr",
-    "name": "Canon DSLR",
+    "slug": "panasonic-hc-v-series",
+    "name": "Panasonic HC-V Series",
     "version": 1,
+    "category": "camcorder",
     "matchRules": {
-      "make": ["Canon"],
+      "make": ["Panasonic"],
+      "model": ["HC-V"],
       "codec": ["h264"]
     },
-    "transformRules": {}
+    "transformRules": {
+      "deinterlace": true,
+      "deinterlaceMode": "yadif"
+    }
   },
   {
     "slug": "panasonic-minidv",
     "name": "Panasonic MiniDV",
     "version": 1,
+    "category": "camcorder",
     "matchRules": {
       "make": ["Panasonic"],
       "codec": ["dvvideo", "dv"]
     },
     "transformRules": {
-      "deinterlace": true
+      "deinterlace": true,
+      "deinterlaceMode": "yadif"
     }
+  },
+  {
+    "slug": "dv-tape-generic",
+    "name": "DV Tape (Generic)",
+    "version": 1,
+    "category": "camcorder",
+    "matchRules": {
+      "codec": ["dvvideo", "dv"],
+      "rejectCodec": ["h264", "hevc"]
+    },
+    "transformRules": {
+      "deinterlace": true,
+      "deinterlaceMode": "yadif",
+      "fieldOrder": "bff"
+    }
+  },
+  {
+    "slug": "gopro-hero-h264",
+    "name": "GoPro HERO (H.264)",
+    "version": 1,
+    "category": "action_cam",
+    "matchRules": {
+      "make": ["GoPro"],
+      "codec": ["h264"],
+      "container": ["mp4"],
+      "rejectCodec": ["hevc"]
+    },
+    "transformRules": {}
   }
 ]
