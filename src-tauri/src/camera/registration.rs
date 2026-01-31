@@ -217,29 +217,49 @@ pub struct SuggestedMatch {
 
 /// After device registration, scan unassigned clips for matches.
 /// Auto-assigns serial/USB matches. Returns model matches as suggestions only (G12).
+/// Reads make/model/serial from sidecars (not stored in clips table).
 pub fn backflow_scan_for_device(
     lib_conn: &Connection,
     device: &crate::db::app_schema::AppCameraDevice,
+    library_root: &Path,
 ) -> Result<BackflowResult> {
     let mut auto_assigned = Vec::new();
     let mut suggested = Vec::new();
 
     // B1: Find all clips without a device assignment
     let mut stmt = lib_conn.prepare(
-        "SELECT id, camera_make, camera_model, serial_number
-         FROM clips
+        "SELECT id FROM clips
          WHERE camera_device_uuid IS NULL OR camera_device_uuid = ''"
     )?;
-    let clips: Vec<(i64, Option<String>, Option<String>, Option<String>)> = stmt.query_map(
+    let clip_ids: Vec<i64> = stmt.query_map(
         [],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| row.get::<_, i64>(0),
     )?.filter_map(|r| r.ok()).collect();
 
-    for (clip_id, clip_make, clip_model, clip_serial) in &clips {
+    // Read make/model/serial from sidecar inputSignature for each clip
+    let sidecars_dir = library_root
+        .join(crate::constants::DADCAM_FOLDER)
+        .join(crate::constants::SIDECARS_FOLDER);
+
+    struct ClipMeta {
+        id: i64,
+        make: Option<String>,
+        model: Option<String>,
+        serial: Option<String>,
+    }
+
+    let mut clips: Vec<ClipMeta> = Vec::new();
+    for clip_id in &clip_ids {
+        let sidecar_path = sidecars_dir.join(format!("{}.json", clip_id));
+        let (make, model, serial) = read_clip_metadata_from_sidecar(&sidecar_path);
+        clips.push(ClipMeta { id: *clip_id, make, model, serial });
+    }
+
+    for clip in &clips {
         // B2: Match by serial number (confidence 0.95)
-        if let (Some(dev_serial), Some(c_serial)) = (&device.serial_number, clip_serial) {
+        if let (Some(dev_serial), Some(ref c_serial)) = (&device.serial_number, &clip.serial) {
             if !dev_serial.is_empty() && dev_serial == c_serial {
-                auto_assigned.push(*clip_id);
+                auto_assigned.push(clip.id);
                 continue;
             }
         }
@@ -247,10 +267,10 @@ pub fn backflow_scan_for_device(
         // B3: Match by make + model (confidence 0.6, suggestion only)
         if device.profile_type != "none" && !device.profile_ref.is_empty() {
             if let Some(dev_mm) = get_device_make_model(device) {
-                if let (Some(cm), Some(cmod)) = (clip_make, clip_model) {
+                if let (Some(ref cm), Some(ref cmod)) = (&clip.make, &clip.model) {
                     if matches_make_model(&dev_mm, cm, cmod) {
                         suggested.push(SuggestedMatch {
-                            clip_id: *clip_id,
+                            clip_id: clip.id,
                             confidence: 0.6,
                             match_method: "make_model".to_string(),
                         });
@@ -262,7 +282,9 @@ pub fn backflow_scan_for_device(
 
     // B4: Check ingest sessions for USB fingerprint matches
     if !device.usb_fingerprints.is_empty() {
-        let usb_matched = match_by_ingest_session_usb(lib_conn, &clips, &device.usb_fingerprints)?;
+        let clip_id_list: Vec<(i64, Option<String>, Option<String>, Option<String>)> =
+            clips.iter().map(|c| (c.id, c.make.clone(), c.model.clone(), c.serial.clone())).collect();
+        let usb_matched = match_by_ingest_session_usb(lib_conn, &clip_id_list, &device.usb_fingerprints)?;
         for clip_id in usb_matched {
             if !auto_assigned.contains(&clip_id) {
                 auto_assigned.push(clip_id);
@@ -303,6 +325,37 @@ pub fn backflow_scan_for_device(
         auto_assigned,
         suggested,
     })
+}
+
+/// Read make/model/serial from a clip's sidecar matchAudit.inputSignature.
+fn read_clip_metadata_from_sidecar(
+    sidecar_path: &Path,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let content = match std::fs::read_to_string(sidecar_path) {
+        Ok(c) => c,
+        Err(_) => return (None, None, None),
+    };
+    let sidecar: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return (None, None, None),
+    };
+    // Try matchAudit.inputSignature first (most reliable)
+    if let Some(sig) = sidecar.get("matchAudit").and_then(|a| a.get("inputSignature")) {
+        return (
+            sig.get("make").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            sig.get("model").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            sig.get("serial").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        );
+    }
+    // Fallback to metadataSnapshot
+    if let Some(snap) = sidecar.get("metadataSnapshot") {
+        return (
+            snap.get("cameraMake").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            snap.get("cameraModel").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            None,
+        );
+    }
+    (None, None, None)
 }
 
 /// Try to get make/model from device's stored dump.

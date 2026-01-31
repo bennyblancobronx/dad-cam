@@ -125,11 +125,14 @@ pub(crate) fn process_single_file(
     };
 
     // Extract full metadata with raw dumps (Layer 0: gold-standard capture)
+    // State: pending -> extracting (crash recovery marker set after clip insert below)
     update_ingest_file_status(conn, ingest_file_id, "metadata", None)?;
     emit_progress_opt(app, &JobProgress::new(job_id_str, "metadata", current, total)
         .with_message(format!("Extracting metadata from {}", file_name)));
     let full_result = crate::metadata::extract_metadata_full(source_path)?;
     let metadata = full_result.metadata.clone();
+    // Determine extraction status for state machine
+    let extraction_ok = full_result.exiftool_success || full_result.ffprobe_success;
 
     // Determine recorded_at with timestamp precedence
     let (recorded_at, timestamp_source) = determine_timestamp(source_path, &metadata)?;
@@ -198,9 +201,18 @@ pub(crate) fn process_single_file(
         camera_profile_type: None,
         camera_profile_ref: None,
         camera_device_uuid: None,
+        metadata_status: Some(if extraction_ok { "extracted" } else { "extraction_failed" }.to_string()),
     };
     let clip_id = insert_clip(conn, &clip)?;
     link_clip_asset(conn, clip_id, asset_id, "primary")?;
+
+    // Transition: extracted -> matching (skip if extraction failed)
+    if extraction_ok {
+        conn.execute(
+            "UPDATE clips SET metadata_status = 'matching' WHERE id = ?1",
+            [clip_id],
+        )?;
+    }
 
     // Legacy camera matching (kept for backward compat)
     let camera_result = crate::camera::matcher::match_camera(
@@ -238,6 +250,14 @@ pub(crate) fn process_single_file(
         stable_ref.as_deref(),
         device_uuid.as_deref(),
     )?;
+
+    // Transition: matching -> matched -> verified
+    if extraction_ok {
+        conn.execute(
+            "UPDATE clips SET metadata_status = 'verified' WHERE id = ?1 AND metadata_status = 'matching'",
+            [clip_id],
+        )?;
+    }
 
     // Create fingerprint for relink
     let fingerprint = compute_size_duration_fingerprint(file_size, metadata.duration_ms);

@@ -438,6 +438,10 @@ const MIGRATIONS: &[&str] = &[
 
     -- Recreate jobs table with expanded type CHECK to include rematch + reextract.
     -- This preserves all existing data.
+    -- Must defer FK checks during the table swap (DROP old -> RENAME new).
+    PRAGMA defer_foreign_keys = ON;
+    DROP TABLE IF EXISTS jobs_new;
+    BEGIN;
     CREATE TABLE jobs_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         type TEXT NOT NULL CHECK (type IN ('ingest', 'proxy', 'thumb', 'sprite', 'export', 'hash_full', 'score', 'ml', 'batch_ingest', 'batch_export', 'relink_scan', 'rematch', 'reextract')),
@@ -462,6 +466,7 @@ const MIGRATIONS: &[&str] = &[
     INSERT INTO jobs_new SELECT * FROM jobs;
     DROP TABLE jobs;
     ALTER TABLE jobs_new RENAME TO jobs;
+    COMMIT;
 
     CREATE INDEX idx_jobs_status ON jobs(status);
     CREATE INDEX idx_jobs_type_status ON jobs(type, status);

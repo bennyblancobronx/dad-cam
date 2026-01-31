@@ -249,6 +249,8 @@ pub struct NewClip {
     pub camera_profile_type: Option<String>,
     pub camera_profile_ref: Option<String>,
     pub camera_device_uuid: Option<String>,
+    // Metadata state machine (Migration 11)
+    pub metadata_status: Option<String>,
 }
 
 pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
@@ -257,8 +259,9 @@ pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
                            duration_ms, width, height, fps, codec, audio_codec, audio_channels,
                            audio_sample_rate, recorded_at, recorded_at_offset_minutes,
                            recorded_at_is_estimated, timestamp_source, source_folder,
-                           camera_profile_type, camera_profile_ref, camera_device_uuid)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                           camera_profile_type, camera_profile_ref, camera_device_uuid,
+                           metadata_status)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             clip.library_id,
             clip.original_asset_id,
@@ -281,6 +284,7 @@ pub fn insert_clip(conn: &Connection, clip: &NewClip) -> Result<i64> {
             clip.camera_profile_type,
             clip.camera_profile_ref,
             clip.camera_device_uuid,
+            clip.metadata_status.as_deref().unwrap_or("pending"),
         ],
     )?;
     Ok(conn.last_insert_rowid())

@@ -44,6 +44,8 @@ pub fn run_next_job(conn: &Connection, library_root: &Path, app: Option<&AppHand
         "thumb" => run_thumb_job(conn, &job, library_root, app),
         "sprite" => run_sprite_job(conn, &job, library_root, app),
         "score" => run_score_job(conn, &job, library_root, app),
+        "rematch" => run_rematch_job(conn, &job, library_root),
+        "reextract" => run_reextract_job(conn, &job, library_root),
         "export" => {
             // VHS export is invoked directly via start_vhs_export command, not through the job queue.
             Err(DadCamError::Other("Export jobs run via start_vhs_export command, not the job queue".to_string()))
@@ -492,5 +494,25 @@ fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
         result.motion_score
     );
 
+    Ok(())
+}
+
+/// Run a rematch job -- re-evaluate generic-fallback clips against current profiles.
+fn run_rematch_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let library_id = job.library_id
+        .ok_or_else(|| DadCamError::Other("Rematch job has no library_id".to_string()))?;
+
+    let upgraded = super::rematch::rematch_library(conn, library_id, library_root)?;
+    eprintln!("Rematch complete: {} clips upgraded from generic-fallback", upgraded);
+    Ok(())
+}
+
+/// Run a reextract job -- re-run exiftool + ffprobe on clips needing updated metadata.
+fn run_reextract_job(conn: &Connection, job: &schema::Job, library_root: &Path) -> Result<()> {
+    let library_id = job.library_id
+        .ok_or_else(|| DadCamError::Other("Reextract job has no library_id".to_string()))?;
+
+    let reextracted = super::reextract::reextract_library(conn, library_id, library_root)?;
+    eprintln!("Reextract complete: {} clips re-extracted", reextracted);
     Ok(())
 }

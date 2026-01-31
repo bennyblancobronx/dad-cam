@@ -4,6 +4,19 @@ This is the source of truth for version number.
 
 ---
 
+0.1.148 -- Fix migration 11 FK constraint failure on existing libraries
+
+- Migration 11 (jobs table recreation) failed with "FOREIGN KEY constraint failed" on existing DBs because FK checks were ON during the table swap. Fixed by adding PRAGMA defer_foreign_keys=ON + explicit BEGIN/COMMIT around the swap, and DROP TABLE IF EXISTS jobs_new for idempotency.
+- Verified end-to-end: fresh library init applies all 11 migrations, test video import produces metadata_status=verified, camera_profile_ref=generic-fallback, full sidecar with matchAudit trail.
+
+0.1.147 -- Metadata state machine + wire rematch/reextract + delete placeholder profiles
+
+- Deleted 9 placeholder bundled camera profiles (sony-handycam, iphone, canon, panasonic, dv-tape, gopro). Only generic-fallback remains as system profile. Real profiles will come from actual camera testing.
+- Metadata state machine wired into ingest pipeline: clips now transition pending -> extracted -> matching -> verified (or extraction_failed if both tools fail). Migration 11 adds metadata_status column.
+- NewClip struct and insert_clip() now set metadata_status explicitly (new clips start as 'pending', not 'verified')
+- Job runner now handles 'rematch' and 'reextract' job types (were defined in rematch.rs/reextract.rs but never wired into runner.rs)
+- Fixed backflow_scan_for_device() in registration.rs: was querying non-existent camera_make/camera_model/serial_number columns on clips table. Now reads from sidecar matchAudit.inputSignature instead.
+
 0.1.146 -- Add is_system/deletable/category to camera profile structs
 
 - BundledProfileJsonEntry now deserializes is_system, deletable, category from bundled_profiles.json (previously silently dropped)

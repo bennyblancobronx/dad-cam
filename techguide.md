@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.146
+Version: 0.1.148
 
 ---
 
@@ -950,8 +950,8 @@ Tie-break (spec 7.4):
 3. Stable sort by profile_ref (deterministic)
 
 Bundled Profiles:
-- Source: resources/cameras/bundled_profiles.json (shipped with app, 10 profiles)
-- Profiles: generic-fallback, sony-handycam-avchd, iphone-h264, iphone-hevc, canon-dslr, canon-vixia-hf, panasonic-hc-v-series, panasonic-minidv, dv-tape-generic, gopro-hero-h264
+- Source: resources/cameras/bundled_profiles.json (shipped with app, 1 profile)
+- Profiles: generic-fallback (system profile, empty match rules, auto-detect transforms)
 - App DB table: bundled_profiles (slug = stable ID)
 - sync_bundled_profiles() does full replace at startup (idempotent)
 - JSON-file-only fields (not stored in DB): is_system, deletable, category
