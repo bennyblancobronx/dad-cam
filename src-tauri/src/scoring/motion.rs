@@ -56,7 +56,7 @@ pub fn analyze_motion(video_path: &Path, duration_ms: i64, verbose: bool) -> Res
     let (static_frames, total_frames) = parse_blackframe_output(&stderr);
 
     if verbose {
-        eprintln!("  Motion detection: {} static frames of {} total", static_frames, total_frames);
+        log::debug!("  Motion detection: {} static frames of {} total", static_frames, total_frames);
     }
 
     if total_frames == 0 {
@@ -72,7 +72,7 @@ pub fn analyze_motion(video_path: &Path, duration_ms: i64, verbose: bool) -> Res
     let (score, reason) = compute_motion_score(motion_ratio);
 
     if verbose {
-        eprintln!("  Motion ratio: {:.3} -> score: {:.2}", motion_ratio, score);
+        log::debug!("  Motion ratio: {:.3} -> score: {:.2}", motion_ratio, score);
     }
 
     Ok((score, Some(reason)))
@@ -114,7 +114,7 @@ fn analyze_motion_fallback(video_path: &Path, verbose: bool) -> Result<(f64, Opt
     let changes = stderr.matches("pts_time:").count();
 
     if verbose {
-        eprintln!("  Motion fallback: {} movement events detected", changes);
+        log::debug!("  Motion fallback: {} movement events detected", changes);
     }
 
     // Normalize: assume 30 changes per minute is high motion

@@ -68,7 +68,7 @@ fn worker_loop(app: AppHandle, library_arc: Arc<Mutex<Option<PathBuf>>>) {
         let conn = match crate::db::open_library_db_connection(&library_root) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Job worker: failed to open DB: {}", e);
+                log::error!("Job worker: failed to open DB: {}", e);
                 continue;
             }
         };
@@ -89,10 +89,10 @@ fn worker_loop(app: AppHandle, library_arc: Arc<Mutex<Option<PathBuf>>>) {
                 // No pending jobs, will sleep on next iteration
             }
             Ok(Err(e)) => {
-                eprintln!("Job worker: job failed: {}", e);
+                log::error!("Job worker: job failed: {}", e);
             }
             Err(_) => {
-                eprintln!("Job worker: job panicked (recovered)");
+                log::error!("Job worker: job panicked (recovered)");
             }
         }
     }
@@ -124,11 +124,11 @@ fn drain_jobs(app: &AppHandle, library_arc: &Arc<Mutex<Option<PathBuf>>>, librar
             Ok(Ok(true)) => continue,     // Another job done, keep going
             Ok(Ok(false)) => return,       // Queue empty
             Ok(Err(e)) => {
-                eprintln!("Job worker: job failed: {}", e);
+                log::error!("Job worker: job failed: {}", e);
                 return;
             }
             Err(_) => {
-                eprintln!("Job worker: job panicked (recovered)");
+                log::error!("Job worker: job panicked (recovered)");
                 return;
             }
         }

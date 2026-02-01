@@ -12,6 +12,7 @@ pub mod licensing;
 pub mod export;
 pub mod cameras;
 pub mod devmenu;
+pub mod diagnostics;
 
 // Re-export all commands for easy registration
 pub use library::*;
@@ -25,6 +26,7 @@ pub use licensing::*;
 pub use export::*;
 pub use cameras::*;
 pub use devmenu::*;
+pub use diagnostics::*;
 
 // Shared database state
 use std::sync::Mutex;

@@ -170,7 +170,7 @@ fn sync_bundled_profiles_at_startup() {
     let conn = match db::app_db::open_app_db_connection() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Warning: Cannot sync bundled profiles (App DB unavailable): {}", e);
+            log::warn!("Cannot sync bundled profiles (App DB unavailable): {}", e);
             return;
         }
     };
@@ -193,7 +193,7 @@ fn sync_bundled_profiles_at_startup() {
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Warning: Failed to read bundled_profiles.json: {}", e);
+                    log::warn!("Failed to read bundled_profiles.json: {}", e);
                     return;
                 }
             };
@@ -201,7 +201,7 @@ fn sync_bundled_profiles_at_startup() {
             let entries: Vec<db::app_schema::BundledProfileJsonEntry> = match serde_json::from_str(&content) {
                 Ok(v) => v,
                 Err(e) => {
-                    eprintln!("Warning: Failed to parse bundled_profiles.json: {}", e);
+                    log::warn!("Failed to parse bundled_profiles.json: {}", e);
                     return;
                 }
             };
@@ -209,10 +209,10 @@ fn sync_bundled_profiles_at_startup() {
             match db::app_schema::sync_bundled_profiles(&conn, &entries) {
                 Ok(count) => {
                     if count > 0 {
-                        eprintln!("Synced {} bundled camera profiles to App DB", count);
+                        log::info!("Synced {} bundled camera profiles to App DB", count);
                     }
                 }
-                Err(e) => eprintln!("Warning: Failed to sync bundled profiles: {}", e),
+                Err(e) => log::warn!("Failed to sync bundled profiles: {}", e),
             }
             return;
         }
@@ -333,7 +333,7 @@ fn migrate_tauri_store_to_app_db(app: &mut tauri::App) {
     // Mark as migrated (do not delete old store file, per spec 6.3)
     let _ = db::app_schema::set_setting(&app_conn, "tauri_store_migrated", "true");
 
-    eprintln!("Migrated Tauri Store settings to App DB");
+    log::info!("Migrated Tauri Store settings to App DB");
 }
 
 /// Import legacy ~/.dadcam/custom_cameras.json into App DB (one-time migration).
@@ -345,7 +345,7 @@ fn import_legacy_devices_at_startup() {
 
     let count = db::app_schema::import_legacy_devices_json(&conn);
     if count > 0 {
-        eprintln!("Imported {} legacy camera devices to App DB", count);
+        log::info!("Imported {} legacy camera devices to App DB", count);
     }
 }
 
@@ -354,7 +354,7 @@ pub fn run() {
     // Initialize App DB (creates ~/.dadcam/app.db with migrations)
     // Must run before Tauri app starts so commands can use it.
     if let Err(e) = db::app_db::ensure_app_db_initialized() {
-        eprintln!("Warning: Failed to initialize App DB: {}", e);
+        log::warn!("Failed to initialize App DB: {}", e);
         // Non-fatal: app can still run but registry/settings features will fail gracefully
     }
 
@@ -364,7 +364,32 @@ pub fn run() {
     // Import legacy ~/.dadcam/custom_cameras.json into App DB (one-time)
     import_legacy_devices_at_startup();
 
+    // Check exiftool availability (non-fatal: metadata extraction degrades gracefully)
+    if let Err(e) = tools::ensure_exiftool() {
+        log::warn!("{}", e);
+    }
+
+    // Initialize logging plugin: writes to OS log directory + stdout.
+    // macOS: ~/Library/Logs/com.dadcam.app/
+    // Windows: %APPDATA%/com.dadcam.app/logs/
+    // Linux: ~/.config/com.dadcam.app/logs/
+    let log_plugin = tauri_plugin_log::Builder::new()
+        .targets([
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+        ])
+        .max_file_size(5_000_000) // 5MB per log file
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+        .level(if cfg!(debug_assertions) {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        })
+        .build();
+
     tauri::Builder::default()
+        .plugin(log_plugin)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -463,6 +488,11 @@ pub fn run() {
             commands::validate_staged_profiles,
             commands::publish_staged_profiles,
             commands::discard_staged_profiles,
+            // Diagnostics commands
+            commands::get_diagnostics_enabled,
+            commands::set_diagnostics_enabled,
+            commands::get_log_directory,
+            commands::export_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

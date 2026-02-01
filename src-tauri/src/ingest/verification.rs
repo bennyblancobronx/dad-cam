@@ -22,7 +22,7 @@ pub fn run_rescan(conn: &Connection, session_id: i64, source_root: &Path) -> Res
 
     // Device ejection detection: if source root is gone, fail the rescan explicitly
     if !source_root.exists() {
-        eprintln!("Rescan failed: source '{}' is no longer accessible (device disconnected?)", source_root.display());
+        log::warn!("Rescan failed: source '{}' is no longer accessible (device disconnected?)", source_root.display());
         update_ingest_session_rescan(conn, session_id, "", false)?;
         return Err(DadCamError::Ingest(format!(
             "Source device disconnected: '{}' is no longer accessible. Session is NOT safe to wipe.",
@@ -71,7 +71,7 @@ pub fn run_rescan(conn: &Connection, session_id: i64, source_root: &Path) -> Res
             Some(rescan_size) if *rescan_size == *manifest_size => {}
             _ => {
                 all_match = false;
-                eprintln!("Rescan mismatch: manifest entry '{}' missing or changed", path);
+                log::warn!("Rescan mismatch: manifest entry '{}' missing or changed", path);
             }
         }
     }
@@ -80,7 +80,7 @@ pub fn run_rescan(conn: &Connection, session_id: i64, source_root: &Path) -> Res
     for path in rescan_set.keys() {
         if !manifest_set.contains_key(path) {
             all_match = false;
-            eprintln!("Rescan mismatch: new file '{}' found on source", path);
+            log::warn!("Rescan mismatch: new file '{}' found on source", path);
         }
     }
 

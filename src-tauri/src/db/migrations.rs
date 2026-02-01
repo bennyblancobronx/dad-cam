@@ -512,7 +512,7 @@ pub fn run_migrations(conn: &Connection) -> Result<()> {
         conn.execute_batch(migration)?;
         conn.execute_batch(&format!("PRAGMA user_version = {}", migration_version))?;
 
-        eprintln!("Applied migration {}", migration_version);
+        log::info!("Applied migration {}", migration_version);
     }
 
     Ok(())

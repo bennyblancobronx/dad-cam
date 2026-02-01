@@ -41,6 +41,13 @@ pub fn open_library(state: State<DbState>, worker: State<WorkerState>, path: Str
     let (conn, library_uuid) = ensure_library_db_initialized(&library_path)
         .map_err(|e| e.to_string())?;
 
+    // Crash recovery: reset clips stuck in transient metadata states (extracting/matching)
+    // so the background worker picks them up again on next poll.
+    let _ = conn.execute(
+        "UPDATE clips SET metadata_status = 'pending' WHERE metadata_status IN ('extracting', 'matching')",
+        [],
+    );
+
     // Register in App DB registry (best-effort)
     if let Ok(app_conn) = app_db::open_app_db_connection() {
         let lib_name = schema::get_library_by_path(&conn, &path)

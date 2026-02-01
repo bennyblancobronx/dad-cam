@@ -18,7 +18,7 @@ pub fn run_next_job(conn: &Connection, library_root: &Path, app: Option<&AppHand
     // First reclaim any expired jobs
     let reclaimed = reclaim_expired_jobs(conn)?;
     if reclaimed > 0 {
-        eprintln!("Reclaimed {} expired jobs", reclaimed);
+        log::info!("Reclaimed {} expired jobs", reclaimed);
     }
 
     // Try to claim a job
@@ -30,7 +30,7 @@ pub fn run_next_job(conn: &Connection, library_root: &Path, app: Option<&AppHand
     let run_token = job.run_token.clone().unwrap_or_default();
     let job_id_str = job.id.to_string();
 
-    eprintln!("Running job {} (type: {})", job.id, job.job_type);
+    log::info!("Running job {} (type: {})", job.id, job.job_type);
 
     // Emit starting progress
     emit_progress_opt(app, &JobProgress::new(&job_id_str, &job.job_type, 0, 1)
@@ -62,13 +62,13 @@ pub fn run_next_job(conn: &Connection, library_root: &Path, app: Option<&AppHand
             complete_job(conn, job.id, &run_token)?;
             emit_progress_opt(app, &JobProgress::new(&job_id_str, "complete", 1, 1)
                 .with_message(format!("{} job completed", job.job_type)));
-            eprintln!("Job {} completed successfully", job.id);
+            log::info!("Job {} completed successfully", job.id);
         }
         Err(ref e) => {
             fail_job(conn, job.id, &run_token, &e.to_string())?;
             emit_progress_opt(app, &JobProgress::new(&job_id_str, "failed", 0, 1)
                 .error(e.to_string()));
-            eprintln!("Job {} failed: {}", job.id, e);
+            log::error!("Job {} failed: {}", job.id, e);
         }
     }
 
@@ -102,7 +102,7 @@ fn run_ingest_job(conn: &Connection, job: &schema::Job, library_root: &Path, app
 
     let result = result?;
 
-    eprintln!(
+    log::info!(
         "Ingest complete: {} processed, {} skipped, {} failed",
         result.processed, result.skipped, result.failed
     );
@@ -531,7 +531,7 @@ fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
 
     // Check if already scored and up to date
     if !scoring::analyzer::needs_scoring(conn, clip_id)? {
-        eprintln!("Clip {} already has up-to-date score", clip_id);
+        log::debug!("Clip {} already has up-to-date score", clip_id);
         return Ok(());
     }
 
@@ -544,7 +544,7 @@ fn run_score_job(conn: &Connection, job: &schema::Job, library_root: &Path, app:
     // Save the score
     scoring::analyzer::save_clip_score(conn, &result)?;
 
-    eprintln!("Scored clip {}: {:.2} (scene={:.2}, audio={:.2}, sharp={:.2}, motion={:.2})",
+    log::debug!("Scored clip {}: {:.2} (scene={:.2}, audio={:.2}, sharp={:.2}, motion={:.2})",
         clip_id,
         result.overall_score,
         result.scene_score,
@@ -562,7 +562,7 @@ fn run_rematch_job(conn: &Connection, job: &schema::Job, library_root: &Path) ->
         .ok_or_else(|| DadCamError::Other("Rematch job has no library_id".to_string()))?;
 
     let upgraded = super::rematch::rematch_library(conn, library_id, library_root)?;
-    eprintln!("Rematch complete: {} clips upgraded from generic-fallback", upgraded);
+    log::info!("Rematch complete: {} clips upgraded from generic-fallback", upgraded);
     Ok(())
 }
 
@@ -572,6 +572,6 @@ fn run_reextract_job(conn: &Connection, job: &schema::Job, library_root: &Path) 
         .ok_or_else(|| DadCamError::Other("Reextract job has no library_id".to_string()))?;
 
     let reextracted = super::reextract::reextract_library(conn, library_id, library_root)?;
-    eprintln!("Reextract complete: {} clips re-extracted", reextracted);
+    log::info!("Reextract complete: {} clips re-extracted", reextracted);
     Ok(())
 }

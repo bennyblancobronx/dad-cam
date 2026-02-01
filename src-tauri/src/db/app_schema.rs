@@ -776,7 +776,7 @@ pub fn import_legacy_devices_json(conn: &Connection) -> u32 {
     let devices: Vec<LegacyDevice> = match serde_json::from_str(&content) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Warning: Failed to parse custom_cameras.json: {}", e);
+            log::warn!("Failed to parse custom_cameras.json: {}", e);
             return 0;
         }
     };
@@ -799,14 +799,14 @@ pub fn import_legacy_devices_json(conn: &Connection) -> u32 {
 
         match upsert_camera_device(conn, &app_device) {
             Ok(_) => imported += 1,
-            Err(e) => eprintln!("Warning: Failed to import device {}: {}", app_device.uuid, e),
+            Err(e) => log::warn!("Failed to import device {}: {}", app_device.uuid, e),
         }
     }
 
     // Rename file to .migrated (do not delete, per spec section 6.4)
     let migrated_path = path.with_extension("json.migrated");
     if let Err(e) = std::fs::rename(&path, &migrated_path) {
-        eprintln!("Warning: Failed to rename custom_cameras.json to .migrated: {}", e);
+        log::warn!("Failed to rename custom_cameras.json to .migrated: {}", e);
     }
 
     imported

@@ -47,7 +47,7 @@ pub fn reextract_library(
         match reextract_single_clip(conn, *clip_id, *asset_id, source_path, library_root) {
             Ok(()) => reextracted += 1,
             Err(e) => {
-                eprintln!("Warning: reextract failed for clip {}: {}", clip_id, e);
+                log::warn!("reextract failed for clip {}: {}", clip_id, e);
             }
         }
     }

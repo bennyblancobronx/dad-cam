@@ -1,7 +1,7 @@
 {
   "name": "dad-cam-app",
   "private": true,
-  "version": "0.1.124",
+  "version": "0.1.154",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,7 @@
     "@tanstack/react-virtual": "^3.13.18",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-log": "^2.8.0",
     "@tauri-apps/plugin-opener": "^2",
     "lru-cache": "^11.2.4",
     "react": "^19.1.0",

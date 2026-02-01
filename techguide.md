@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.153
+Version: 0.1.154
 
 ---
 
@@ -39,6 +39,8 @@ Key dependencies:
 - blake3: BLAKE3 hashing (3+ GB/s with SIMD)
 - ffmpeg-sidecar: FFmpeg/ffprobe wrapper with auto-download
 - exiftool: Bundled as Tauri sidecar
+- tauri-plugin-log: Persistent rotating log files
+- log: Structured logging macros (info/warn/error/debug)
 
 Rust backend owns:
 - All database operations
@@ -554,6 +556,7 @@ Tauri Command Layer:
 - Library Fix Commands: list_bundled_profiles, list_user_profiles, create_user_profile, update_user_profile, delete_user_profile, list_camera_devices, register_camera_device, match_camera, import_camera_db, export_camera_db, stage_profile, list_staged, validate_staged, publish_staged, discard_staged, list_registry_libraries
 - Import Verification Commands: get_session_status, get_session_by_job, export_audit_report, wipe_source_files
 - Settings Commands (App DB): get_app_settings, save_app_settings, get_mode, set_mode, add_recent_library, remove_recent_library, get_recent_libraries, validate_library_path
+- Diagnostics Commands: get_diagnostics_enabled, set_diagnostics_enabled, get_log_directory, export_logs
 - All responses use camelCase (serde rename_all)
 
 Key Components:
@@ -761,6 +764,7 @@ Settings storage (App DB app_settings KV table):
 - firstRunCompleted: "true" | "false"
 - dev_menu: JSON (titleStartSeconds, jlBlendMs, scoreWeights, watermarkText)
 - license_state_cache: JSON (licenseType, isActive, daysRemaining) | null
+- diagnostics_enabled: "true" | "false" (default: false, opt-in crash reporting preference)
 - tauri_store_migrated: "true" (set after one-time Tauri Store migration)
 
 Recent projects are derived from the libraries registry table (App DB), not a settings array.
@@ -1153,6 +1157,40 @@ Error Handling:
 - Sidecar disappeared between manifest and copy: marks entry changed, blocks SAFE TO WIPE
 - Sidecar I/O failure: captures error_code (SIDECAR_COPY_FAILED) + error_detail
 - Parent media success does NOT imply sidecar success (each independent)
+
+---
+
+Logging
+
+Persistent structured logging via tauri-plugin-log. All Rust backend and frontend console output writes to the same rotating log files.
+
+Configuration:
+- Targets: LogDir (persistent files), Stdout (dev console), Webview (frontend bridge)
+- Max file size: 5MB per log file
+- Rotation: KeepSome(5) -- max 5 rotated files, oldest deleted
+- Level: Debug in dev builds, Info in release builds
+- Log directory: OS-specific (macOS: ~/Library/Logs/com.dadcam.app/)
+
+Rust logging:
+- All eprintln! calls replaced with log::info/warn/error/debug macros
+- Exception: cli.rs (CLI binary has its own output) and scoring/tests.rs (test output)
+- Uses fully-qualified log::info!() etc. to avoid import conflicts with other crates
+
+Frontend logging:
+- @tauri-apps/plugin-log attachConsole() bridges console.log/warn/error to the same log files
+- Attached in main.tsx at app startup
+
+Diagnostics preference:
+- Stored in App DB app_settings as diagnostics_enabled (default: false)
+- Controls future opt-in crash reporting (Sentry not wired yet)
+- UI toggle in Settings > About section
+- Rental licenses may auto-enable in future
+
+Tauri Commands:
+- get_diagnostics_enabled: Read current preference from App DB
+- set_diagnostics_enabled: Write preference to App DB
+- get_log_directory: Returns OS log directory path
+- export_logs: Copies .log files from log directory to user-chosen folder (returns count)
 
 ---
 

@@ -28,7 +28,7 @@ pub fn rematch_library(conn: &Connection, library_id: i64, library_root: &std::p
             Ok(true) => upgraded += 1,
             Ok(false) => {}
             Err(e) => {
-                eprintln!("Warning: rematch failed for clip {}: {}", clip_id, e);
+                log::warn!("rematch failed for clip {}: {}", clip_id, e);
             }
         }
     }

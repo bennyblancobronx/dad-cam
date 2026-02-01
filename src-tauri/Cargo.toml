@@ -1,6 +1,6 @@
 [package]
 name = "dad-cam"
-version = "0.1.128"
+version = "0.1.154"
 description = "A cross-platform video library for dad cam footage"
 authors = ["Dad Cam Team"]
 edition = "2021"
@@ -27,6 +27,10 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"
+tauri-plugin-log = "2"
+
+# Structured logging
+log = "0.4"
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }

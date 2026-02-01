@@ -48,7 +48,7 @@ pub fn ensure_library_db_initialized(library_root: &Path) -> Result<(Connection,
     // Backfill stable camera refs for clips with legacy integer IDs (spec 6.2, one-time)
     let backfilled = app_schema::backfill_stable_camera_refs(&conn);
     if backfilled > 0 {
-        eprintln!("Backfilled stable camera refs for {} clips", backfilled);
+        log::info!("Backfilled stable camera refs for {} clips", backfilled);
     }
 
     Ok((conn, uuid))

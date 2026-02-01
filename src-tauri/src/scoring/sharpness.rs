@@ -134,7 +134,7 @@ fn compute_sharpness_result(blur_values: &[f64], verbose: bool) -> Result<(f64, 
     let avg_blur: f64 = blur_values.iter().sum::<f64>() / blur_values.len() as f64;
 
     if verbose {
-        eprintln!("  Blur detection: avg={:.1} (sampled {} frames)", avg_blur, blur_values.len());
+        log::debug!("  Blur detection: avg={:.1} (sampled {} frames)", avg_blur, blur_values.len());
     }
 
     // Convert blur to sharpness (per spec: sharpness = 1.0 - (avg_blur / max_blur))

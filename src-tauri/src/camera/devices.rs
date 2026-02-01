@@ -211,7 +211,7 @@ pub fn load_devices_from_json(conn: &Connection) -> u32 {
     let devices: Vec<CameraDevice> = match serde_json::from_str(&content) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Warning: Failed to parse custom_cameras.json: {}", e);
+            log::warn!("Failed to parse custom_cameras.json: {}", e);
             return 0;
         }
     };
@@ -240,7 +240,7 @@ pub fn load_devices_from_json(conn: &Connection) -> u32 {
                 ],
             ) {
                 Ok(_) => inserted += 1,
-                Err(e) => eprintln!("Warning: Failed to import device {}: {}", device.uuid, e),
+                Err(e) => log::warn!("Failed to import device {}: {}", device.uuid, e),
             }
         }
     }

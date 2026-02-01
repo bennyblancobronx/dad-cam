@@ -76,7 +76,7 @@ pub fn analyze_scenes(video_path: &Path, duration_ms: i64, verbose: bool) -> Res
         .count() as i32;
 
     if verbose {
-        eprintln!("  Detected {} scene changes via scdet", scene_count);
+        log::debug!("  Detected {} scene changes via scdet", scene_count);
     }
 
     // Score based on scene count
@@ -105,7 +105,7 @@ fn analyze_scenes_fallback(video_path: &Path, duration_secs: f64, verbose: bool)
     let scene_count = stderr.matches("pts_time:").count() as i32;
 
     if verbose {
-        eprintln!("  Detected {} scene changes via select filter (fallback)", scene_count);
+        log::debug!("  Detected {} scene changes via select filter (fallback)", scene_count);
     }
 
     let (score, reason) = compute_scene_score(scene_count, duration_secs);

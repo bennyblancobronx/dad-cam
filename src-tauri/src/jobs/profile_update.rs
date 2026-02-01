@@ -35,7 +35,7 @@ pub fn rematch_on_profile_change(
             Ok(true) => upgraded += 1,
             Ok(false) => {}
             Err(e) => {
-                eprintln!("Warning: profile-change rematch failed for clip {}: {}", clip_id, e);
+                log::warn!("profile-change rematch failed for clip {}: {}", clip_id, e);
             }
         }
     }

@@ -97,7 +97,13 @@ pub fn ensure_app_db_initialized() -> Result<()> {
 
     // Create ~/.dadcam/ directory if missing
     if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!(
+                "Cannot create App DB directory {}: {}. Check directory permissions.",
+                parent.display(),
+                e
+            )
+        })?;
     }
 
     let conn = Connection::open(&db_path)?;
@@ -107,8 +113,16 @@ pub fn ensure_app_db_initialized() -> Result<()> {
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
     conn.execute_batch("PRAGMA busy_timeout=5000;")?;
 
+    // Check if this is a fresh database (no migrations applied yet)
+    let was_fresh = get_app_schema_version(&conn)? == 0;
+
     // Run migrations
     run_app_migrations(&conn)?;
+
+    // Seed default settings on fresh install (no legacy store to migrate from)
+    if was_fresh {
+        seed_default_settings(&conn)?;
+    }
 
     Ok(())
 }
@@ -169,9 +183,21 @@ fn run_app_migrations(conn: &Connection) -> Result<()> {
         conn.execute_batch(migration)?;
         conn.execute_batch(&format!("PRAGMA user_version = {}", migration_version))?;
 
-        eprintln!("Applied App DB migration {}", migration_version);
+        log::info!("Applied App DB migration {}", migration_version);
     }
 
+    Ok(())
+}
+
+/// Seed default settings for a fresh install.
+/// Uses INSERT OR IGNORE so it won't overwrite values set by Tauri Store migration.
+fn seed_default_settings(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('ui_mode', 'simple');
+         INSERT OR IGNORE INTO app_settings (key, value) VALUES ('first_run_completed', 'false');
+         INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'system');
+         INSERT OR IGNORE INTO app_settings (key, value) VALUES ('diagnostics_enabled', 'false');"
+    )?;
     Ok(())
 }
 
@@ -202,6 +228,29 @@ mod tests {
         // Verify version
         let version = get_app_schema_version(&conn).unwrap();
         assert_eq!(version, 3, "App DB should be at version 3 after A1+A2+A3");
+
+        // Verify default settings were seeded
+        seed_default_settings(&conn).unwrap();
+        let ui_mode: String = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'ui_mode'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(ui_mode, "simple");
+
+        let theme: String = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'theme'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(theme, "system");
+
+        let frc: String = conn.query_row(
+            "SELECT value FROM app_settings WHERE key = 'first_run_completed'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(frc, "false");
     }
 
     #[test]

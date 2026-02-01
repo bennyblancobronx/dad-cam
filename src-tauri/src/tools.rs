@@ -147,7 +147,7 @@ pub fn ensure_ffmpeg() -> anyhow::Result<(PathBuf, PathBuf)> {
     }
 
     // Try to download via ffmpeg-sidecar
-    eprintln!("FFmpeg not found, attempting to download via ffmpeg-sidecar...");
+    log::info!("FFmpeg not found, attempting to download via ffmpeg-sidecar...");
 
     ffmpeg_sidecar::download::auto_download()
         .map_err(|e| anyhow::anyhow!("Failed to download FFmpeg: {}", e))?;
@@ -164,8 +164,25 @@ pub fn ensure_ffmpeg() -> anyhow::Result<(PathBuf, PathBuf)> {
         return Err(anyhow::anyhow!("FFprobe binary not found at {:?}", ffprobe));
     }
 
-    eprintln!("FFmpeg downloaded successfully");
+    log::info!("FFmpeg downloaded successfully");
     Ok((ffmpeg, ffprobe))
+}
+
+/// Ensure exiftool is available.
+/// Unlike ffmpeg (which auto-downloads via ffmpeg-sidecar), exiftool must be
+/// bundled at build time or installed on the system. Returns an error with a
+/// clear message if missing.
+pub fn ensure_exiftool() -> anyhow::Result<PathBuf> {
+    let path = exiftool_path();
+
+    if is_tool_available("exiftool") {
+        return Ok(path);
+    }
+
+    Err(anyhow::anyhow!(
+        "exiftool not found. Metadata extraction will be unavailable. \
+         Install exiftool (https://exiftool.org) or run scripts/download-exiftool.sh before building."
+    ))
 }
 
 /// Check all required tools and report status

@@ -180,7 +180,7 @@ fn run_ingest_job_inner(
             Err(e) => {
                 result.failed += 1;
                 update_ingest_file_status(conn, ingest_file.id, "failed", Some(&e.to_string()))?;
-                eprintln!("Failed to process {}: {}", source_path.display(), e);
+                log::error!("Failed to process {}: {}", source_path.display(), e);
             }
         }
     }
@@ -220,7 +220,7 @@ fn run_ingest_job_inner(
                 Err(e) => {
                     result.failed += 1;
                     result.sidecar_failed += 1;
-                    eprintln!("Failed to process sidecar {}: {}", sidecar_entry.relative_path, e);
+                    log::error!("Failed to process sidecar {}: {}", sidecar_entry.relative_path, e);
                     // Mark manifest entry as failed (blocks SAFE TO WIPE)
                     let _ = update_manifest_entry_result(
                         conn, sidecar_entry.id, "failed", None, None,
@@ -247,7 +247,7 @@ fn run_ingest_job_inner(
         let _ = update_ingest_session_status(conn, sid, "rescanning");
         // Run rescan gate
         if let Err(e) = super::verification::run_rescan(conn, sid, source_root) {
-            eprintln!("Rescan failed for session {}: {}", sid, e);
+            log::warn!("Rescan failed for session {}: {}", sid, e);
         }
         let _ = update_ingest_session_status(conn, sid, "complete");
         let _ = update_ingest_session_finished(conn, sid);

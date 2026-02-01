@@ -4,6 +4,15 @@ This is the source of truth for version number.
 
 ---
 
+0.1.154 -- Structured logging + diagnostics preference
+
+- Added tauri-plugin-log: all Rust and frontend logs now write to persistent rotating log files in the OS log directory (~/Library/Logs/com.dadcam.app/ on macOS). Max 5 files at 5MB each.
+- Replaced all 58 eprintln! calls across 20 source files with structured log macros (log::info/warn/error/debug). CLI binary and test files unchanged.
+- Frontend console.log/warn/error bridged to the same log files via @tauri-apps/plugin-log.
+- Added diagnostics commands: get/set diagnostics_enabled preference (stored in App DB app_settings), get_log_directory, export_logs (copies log files to user-chosen folder).
+- Added diagnostics toggle and log export button in Settings > About section.
+- Diagnostics (crash reporting) defaults to OFF per contract 13. Preference is stored but Sentry integration is not wired yet -- this version adds the local logging foundation and the preference plumbing.
+
 0.1.153 -- Repo cleanup: remove dead planning docs, harden gitignore
 
 - Deleted 21 obsolete planning docs (phase-0 through phase-9, importplan, libraryfix, metadata-plan, sidecar-importplan, v0.2.0 plans, dashboard-redesign, pro-register-camera). Only docs/planning/checklist.md remains as the active release checklist.

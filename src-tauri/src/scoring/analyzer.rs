@@ -44,16 +44,16 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
     let (video_path, using_proxy) = get_scoring_video_path(conn, clip_id, clip.original_asset_id, library_root)?;
 
     if verbose {
-        eprintln!("Analyzing clip {}: {}", clip_id, clip.title);
+        log::debug!("Analyzing clip {}: {}", clip_id, clip.title);
         if using_proxy {
-            eprintln!("  Using proxy for analysis");
+            log::debug!("  Using proxy for analysis");
         }
     }
 
     // Skip non-video content (audio, images get neutral scores)
     if clip.media_type != "video" {
         if verbose {
-            eprintln!("  Skipping non-video media type: {}", clip.media_type);
+            log::debug!("  Skipping non-video media type: {}", clip.media_type);
         }
         result.scene_score = 0.5;
         result.audio_score = 0.5;
@@ -77,7 +77,7 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
         }
         Err(e) => {
             if verbose {
-                eprintln!("  Scene analysis failed: {}", e);
+                log::warn!("  Scene analysis failed: {}", e);
             }
             result.scene_score = 0.5;
             result.add_reason(R_UNAVAILABLE);
@@ -94,7 +94,7 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
         }
         Err(e) => {
             if verbose {
-                eprintln!("  Audio analysis failed: {}", e);
+                log::warn!("  Audio analysis failed: {}", e);
             }
             result.audio_score = 0.5;
             result.add_reason(R_UNAVAILABLE);
@@ -111,7 +111,7 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
         }
         Err(e) => {
             if verbose {
-                eprintln!("  Sharpness analysis failed: {}", e);
+                log::warn!("  Sharpness analysis failed: {}", e);
             }
             result.sharpness_score = 0.5;
             result.add_reason(R_UNAVAILABLE);
@@ -128,7 +128,7 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
         }
         Err(e) => {
             if verbose {
-                eprintln!("  Motion analysis failed: {}", e);
+                log::warn!("  Motion analysis failed: {}", e);
             }
             result.motion_score = 0.5;
             result.add_reason(R_UNAVAILABLE);
@@ -139,9 +139,9 @@ pub fn analyze_clip(conn: &Connection, clip_id: i64, library_root: &Path, verbos
     result.compute_overall();
 
     if verbose {
-        eprintln!("  Scene: {:.2}, Audio: {:.2}, Sharpness: {:.2}, Motion: {:.2}",
+        log::debug!("  Scene: {:.2}, Audio: {:.2}, Sharpness: {:.2}, Motion: {:.2}",
             result.scene_score, result.audio_score, result.sharpness_score, result.motion_score);
-        eprintln!("  Overall: {:.2}", result.overall_score);
+        log::debug!("  Overall: {:.2}", result.overall_score);
     }
 
     Ok(result)

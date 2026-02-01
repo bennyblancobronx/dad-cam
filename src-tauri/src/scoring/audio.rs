@@ -53,12 +53,12 @@ pub fn analyze_audio(video_path: &Path, duration_ms: i64, verbose: bool) -> Resu
 
     if verbose {
         if stats.has_audio {
-            eprintln!("  Audio (EBU R128): I={:.1} LUFS, LRA={:.1} LU, Peak={:.1} dBTP",
+            log::debug!("  Audio (EBU R128): I={:.1} LUFS, LRA={:.1} LU, Peak={:.1} dBTP",
                 stats.integrated_lufs.unwrap_or(0.0),
                 stats.lra.unwrap_or(0.0),
                 stats.true_peak.unwrap_or(0.0));
         } else {
-            eprintln!("  No audio stream detected");
+            log::debug!("  No audio stream detected");
         }
     }
 

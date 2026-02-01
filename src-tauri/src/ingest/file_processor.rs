@@ -259,6 +259,21 @@ pub(crate) fn process_single_file(
         )?;
     }
 
+    // Mark ingest session metadata_complete_at when all its clips reach a terminal state.
+    // Path: ingest_files.clip_id -> clips, ingest_files.job_id -> ingest_sessions.job_id.
+    conn.execute(
+        "UPDATE ingest_sessions SET metadata_complete_at = datetime('now')
+         WHERE job_id = (SELECT job_id FROM ingest_files WHERE clip_id = ?1 LIMIT 1)
+         AND metadata_complete_at IS NULL
+         AND NOT EXISTS (
+             SELECT 1 FROM ingest_files if2
+             JOIN clips c ON c.id = if2.clip_id
+             WHERE if2.job_id = ingest_sessions.job_id
+             AND (c.metadata_status IS NULL OR c.metadata_status NOT IN ('verified', 'extraction_failed'))
+         )",
+        [clip_id],
+    )?;
+
     // Create fingerprint for relink
     let fingerprint = compute_size_duration_fingerprint(file_size, metadata.duration_ms);
     insert_fingerprint(conn, clip_id, "size_duration", &fingerprint)?;
@@ -324,7 +339,7 @@ pub(crate) fn process_single_file(
         rental_audit: None,
     };
     if let Err(e) = super::sidecar::write_sidecar(library_root, clip_id, &sidecar_data) {
-        eprintln!("Warning: Failed to write sidecar for clip {}: {}", clip_id, e);
+        log::warn!("Failed to write sidecar for clip {}: {}", clip_id, e);
     }
 
     update_ingest_file_complete(conn, ingest_file_id, &dest_path, asset_id, clip_id)?;

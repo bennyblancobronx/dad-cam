@@ -1,9 +1,10 @@
 // Dad Cam - Settings View (Full Page)
 // Braun Design Language v1.0.0 - Settings nav (200px) + Form content (640px max)
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { AppSettings, AppMode, FeatureFlags } from '../types/settings';
 import { setMode, saveAppSettings, getAppSettings } from '../api/settings';
+import { getDiagnosticsEnabled, setDiagnosticsEnabled, getLogDirectory, exportLogs } from '../api/diagnostics';
 import { APP_VERSION } from '../constants';
 import { CamerasView } from './CamerasView';
 
@@ -20,6 +21,9 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [diagnosticsEnabled, setDiagnosticsState] = useState(false);
+  const [logDir, setLogDir] = useState<string | null>(null);
+  const [exportResult, setExportResult] = useState<string | null>(null);
 
   // Easter egg: click version 7 times to open dev menu
   const versionClickCount = useRef(0);
@@ -42,6 +46,38 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
     versionClickTimer.current = setTimeout(() => {
       versionClickCount.current = 0;
     }, 2000);
+  };
+
+  // Load diagnostics preference and log directory on mount
+  useEffect(() => {
+    getDiagnosticsEnabled().then(setDiagnosticsState).catch(() => {});
+    getLogDirectory().then(setLogDir).catch(() => {});
+  }, []);
+
+  const handleDiagnosticsToggle = async (enabled: boolean) => {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await setDiagnosticsEnabled(enabled);
+      setDiagnosticsState(enabled);
+    } catch (err) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleExportLogs = async () => {
+    setExportResult(null);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const dir = await open({ directory: true, title: 'Choose folder for log export' });
+      if (!dir) return;
+      const count = await exportLogs(dir as string);
+      setExportResult(`Exported ${count} log file${count !== 1 ? 's' : ''}`);
+    } catch (err) {
+      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Export failed');
+    }
   };
 
   const handleThemeChange = async (theme: 'light' | 'dark') => {
@@ -360,6 +396,44 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
                   <p>A modern video library for importing, organizing, viewing, and auto-editing footage from old-school digital cameras.</p>
                 </div>
               </div>
+
+              <h2 className="settings-section-title" style={{ marginTop: 'var(--space-lg)' }}>Diagnostics</h2>
+              <div className="feature-toggles">
+                <label className="feature-toggle-row">
+                  <div className="feature-toggle-info">
+                    <span className="feature-toggle-label">Send anonymous crash reports</span>
+                    <span className="feature-toggle-description">
+                      Help improve Dad Cam by sending anonymous crash data when something goes wrong. No personal data or file paths are included.
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="feature-toggle-switch"
+                    checked={diagnosticsEnabled}
+                    onChange={(e) => handleDiagnosticsToggle(e.target.checked)}
+                    disabled={isSaving}
+                  />
+                </label>
+              </div>
+
+              <h2 className="settings-section-title" style={{ marginTop: 'var(--space-lg)' }}>Log Files</h2>
+              <p className="settings-section-description">
+                Local logs are always saved for troubleshooting, even when crash reporting is off.
+                {logDir && <><br /><span style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{logDir}</span></>}
+              </p>
+              <button
+                className="primary-button"
+                onClick={handleExportLogs}
+                disabled={isSaving}
+                style={{ marginTop: 'var(--space-sm)' }}
+              >
+                Export log files
+              </button>
+              {exportResult && (
+                <p className="settings-section-description" style={{ marginTop: 'var(--space-xs)' }}>
+                  {exportResult}
+                </p>
+              )}
             </div>
           )}
         </div>
