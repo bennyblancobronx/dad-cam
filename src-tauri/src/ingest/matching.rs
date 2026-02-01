@@ -39,6 +39,7 @@ pub(crate) fn score_to_confidence(score: f64) -> f64 {
 ///
 /// Also resolves legacy library-local profile_id by name for backward compat.
 /// Returns (profile_type, profile_ref, device_uuid).
+#[allow(dead_code)]
 pub(crate) fn resolve_stable_camera_refs(
     lib_conn: &Connection,
     legacy_profile_id: Option<i64>,
@@ -381,6 +382,7 @@ fn check_reject_rules(
     None
 }
 
+#[allow(dead_code)]
 /// Resolve profile using App DB priority: user profiles > bundled profiles > legacy name > fallback.
 fn resolve_profile_from_app_db(
     app_conn: &Connection,
@@ -705,6 +707,7 @@ fn score_match_rules_detailed(
     }
 }
 
+#[allow(dead_code)]
 /// Fallback when App DB is unavailable: resolve from legacy library DB refs only.
 fn resolve_stable_refs_fallback(
     lib_conn: &Connection,

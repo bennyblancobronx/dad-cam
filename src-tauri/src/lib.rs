@@ -388,6 +388,14 @@ pub fn run() {
         })
         .build();
 
+    // Restore saved log level from App DB (if set by user).
+    // Deferred to setup() because the log plugin must initialize first.
+    if let Ok(app_conn) = db::app_db::open_app_db_connection() {
+        if let Ok(Some(level)) = db::app_schema::get_setting(&app_conn, "log_level") {
+            std::env::set_var("DADCAM_LOG_LEVEL", level);
+        }
+    }
+
     tauri::Builder::default()
         .plugin(log_plugin)
         .plugin(tauri_plugin_opener::init())
@@ -396,6 +404,17 @@ pub fn run() {
         .manage(DbState(Mutex::new(None)))
         .manage(jobs::worker::WorkerState::new())
         .setup(|app| {
+            // Apply saved log level (deferred from pre-build so plugin is initialized)
+            if let Ok(level_str) = std::env::var("DADCAM_LOG_LEVEL") {
+                let filter = match level_str.as_str() {
+                    "debug" => log::LevelFilter::Debug,
+                    "warn" => log::LevelFilter::Warn,
+                    "error" => log::LevelFilter::Error,
+                    _ => log::LevelFilter::Info,
+                };
+                log::set_max_level(filter);
+            }
+
             migrate_tauri_store_to_app_db(app);
             // Spawn background job worker thread
             let worker_state: tauri::State<jobs::worker::WorkerState> = app.state();
@@ -493,6 +512,10 @@ pub fn run() {
             commands::set_diagnostics_enabled,
             commands::get_log_directory,
             commands::export_logs,
+            commands::export_support_bundle,
+            commands::get_system_health,
+            commands::get_log_level,
+            commands::set_log_level,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,5 @@
 // Dad Cam CLI binary
+#![allow(dead_code)]
 
 use std::path::PathBuf;
 use clap::{Parser, Subcommand};
@@ -1080,17 +1081,15 @@ fn cmd_cleanup(
 
         // Group by (clip_id, role) and find duplicates
         let mut current_key: Option<(i64, String)> = None;
-        let mut first_in_group = true;
-
         for (clip_id, role, asset_id, path, size, _created_at) in rows {
             let key = (clip_id, role.clone());
 
-            if current_key.as_ref() != Some(&key) {
+            let first_in_group = if current_key.as_ref() != Some(&key) {
                 current_key = Some(key);
-                first_in_group = true;
+                true
             } else {
-                first_in_group = false;
-            }
+                false
+            };
 
             // Keep the first (newest) in each group, mark others as duplicates
             if !first_in_group {
@@ -1294,7 +1293,7 @@ fn cmd_score(library: Option<PathBuf>, clip_id: Option<i64>, force: bool, verbos
 
     // Note: workers > 1 requires threaded execution (future enhancement)
     if workers > 1 && verbose {
-        eprintln!("Note: Multi-worker scoring uses {} concurrent workers", workers);
+        println!("Note: Multi-worker scoring uses {} concurrent workers", workers);
     }
     let _ = timeout_secs; // Reserved for future timeout implementation
 

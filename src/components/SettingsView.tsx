@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect } from 'react';
 import type { AppSettings, AppMode, FeatureFlags } from '../types/settings';
 import { setMode, saveAppSettings, getAppSettings } from '../api/settings';
-import { getDiagnosticsEnabled, setDiagnosticsEnabled, getLogDirectory, exportLogs } from '../api/diagnostics';
+import { getDiagnosticsEnabled, setDiagnosticsEnabled, getLogDirectory, exportLogs, exportSupportBundle } from '../api/diagnostics';
 import { APP_VERSION } from '../constants';
 import { CamerasView } from './CamerasView';
 
@@ -421,14 +421,33 @@ export function SettingsView({ settings, onSettingsChange, onBack, onOpenDevMenu
                 Local logs are always saved for troubleshooting, even when crash reporting is off.
                 {logDir && <><br /><span style={{ fontFamily: 'monospace', fontSize: '0.85em' }}>{logDir}</span></>}
               </p>
-              <button
-                className="primary-button"
-                onClick={handleExportLogs}
-                disabled={isSaving}
-                style={{ marginTop: 'var(--space-sm)' }}
-              >
-                Export log files
-              </button>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-sm)' }}>
+                <button
+                  className="primary-button"
+                  onClick={handleExportLogs}
+                  disabled={isSaving}
+                >
+                  Export log files
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={async () => {
+                    setExportResult(null);
+                    try {
+                      const { open } = await import('@tauri-apps/plugin-dialog');
+                      const dir = await open({ directory: true, title: 'Choose folder for support bundle' });
+                      if (!dir) return;
+                      const bundlePath = await exportSupportBundle(dir as string);
+                      setExportResult(`Support bundle saved to: ${bundlePath}`);
+                    } catch (err) {
+                      setError(typeof err === 'string' ? err : err instanceof Error ? err.message : 'Export failed');
+                    }
+                  }}
+                  disabled={isSaving}
+                >
+                  Export support bundle
+                </button>
+              </div>
               {exportResult && (
                 <p className="settings-section-description" style={{ marginTop: 'var(--space-xs)' }}>
                   {exportResult}

@@ -21,6 +21,7 @@ import { FirstRunWizard } from './components/FirstRunWizard';
 import { TrialBanner } from './components/TrialBanner';
 import { DevMenu } from './components/DevMenu';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastNotification } from './components/ToastNotification';
 import './App.css';
 
 /** Unmounted library state for error recovery */
@@ -350,6 +351,7 @@ function App() {
   if (library) {
     return (
       <ErrorBoundary>
+        <ToastNotification />
         {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
         <LibraryView
           library={library}
@@ -432,6 +434,7 @@ function App() {
 
     return (
       <ErrorBoundary>
+        <ToastNotification />
         {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
         <LibraryDashboard
           onLibrarySelect={setLibrary}
@@ -445,6 +448,7 @@ function App() {
   // Simple mode: Welcome/open screen
   return (
     <div className="app-welcome">
+      <ToastNotification />
       {license && <TrialBanner licenseState={license} onLicenseChange={handleLicenseChange} />}
       <div className="welcome-container">
         <h1 className="welcome-title">dad cam</h1>

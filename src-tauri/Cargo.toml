@@ -1,6 +1,6 @@
 [package]
 name = "dad-cam"
-version = "0.1.154"
+version = "0.1.155"
 description = "A cross-platform video library for dad cam footage"
 authors = ["Dad Cam Team"]
 edition = "2021"

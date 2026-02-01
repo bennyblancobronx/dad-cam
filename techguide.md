@@ -2,7 +2,7 @@ Dad Cam App — Technical Guide
 
 This is the manual for the app. Core logic, CLI commands, and implementation details.
 
-Version: 0.1.154
+Version: 0.1.155
 
 ---
 
@@ -556,7 +556,7 @@ Tauri Command Layer:
 - Library Fix Commands: list_bundled_profiles, list_user_profiles, create_user_profile, update_user_profile, delete_user_profile, list_camera_devices, register_camera_device, match_camera, import_camera_db, export_camera_db, stage_profile, list_staged, validate_staged, publish_staged, discard_staged, list_registry_libraries
 - Import Verification Commands: get_session_status, get_session_by_job, export_audit_report, wipe_source_files
 - Settings Commands (App DB): get_app_settings, save_app_settings, get_mode, set_mode, add_recent_library, remove_recent_library, get_recent_libraries, validate_library_path
-- Diagnostics Commands: get_diagnostics_enabled, set_diagnostics_enabled, get_log_directory, export_logs
+- Diagnostics Commands: get_diagnostics_enabled, set_diagnostics_enabled, get_log_directory, export_logs, export_support_bundle, get_system_health, get_log_level, set_log_level
 - All responses use camelCase (serde rename_all)
 
 Key Components:
@@ -1191,6 +1191,23 @@ Tauri Commands:
 - set_diagnostics_enabled: Write preference to App DB
 - get_log_directory: Returns OS log directory path
 - export_logs: Copies .log files from log directory to user-chosen folder (returns count)
+- export_support_bundle: One-click export of log files, system info, tool versions, and library stats into a single folder. Creates support-bundle-YYYYMMDD-HHMMSS/ at target path with summary.txt + log copies.
+- get_system_health: Returns SystemHealth struct: pendingJobs (type, count pairs), failedJobs24h, lastError, originalsSize, derivedSize, dbSize. Requires open library.
+- get_log_level: Returns current runtime log level string (debug/info/warn/error)
+- set_log_level: Sets runtime log level via log::set_max_level(). Persists to App DB app_settings so it restores on next launch.
+
+App settings key:
+- log_level: "debug" | "info" | "warn" | "error" (default: info for release, debug for dev)
+
+Toast Notifications:
+- ToastNotification component listens for job-progress events with isError flag
+- Shows dismissable toast at bottom-right, auto-dismiss after 8 seconds, max 3 stacked
+- Mounted in App.tsx across all render paths (library, dashboard, welcome)
+
+Dev Menu additions (Debug Tools section):
+- System Health panel: pending jobs breakdown, failed 24h, disk usage (originals/derived/DB), last error. Manual refresh button.
+- Log Level selector: radio buttons for debug/info/warn/error, changes take effect immediately, persists across restarts.
+- Support Bundle button: exports all diagnostic data to one folder.
 
 ---
 

@@ -4,6 +4,12 @@ import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
+import {
+  getLogLevel,
+  setLogLevel,
+  exportSupportBundle,
+} from '../../api/diagnostics';
+import { SystemHealthPanel } from './SystemHealthPanel';
 
 interface ToolStatus {
   name: string;
@@ -25,9 +31,17 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
   const [clipIdInput, setClipIdInput] = useState('');
   const [sqlTarget, setSqlTarget] = useState<'library' | 'app'>('library');
 
+  // Log level state
+  const [logLevel, setLogLevelState] = useState<string>('info');
+
   // Log viewer state
   const [logs, setLogs] = useState<string[]>([]);
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Load log level on mount
+  useEffect(() => {
+    getLogLevel().then(setLogLevelState).catch(() => {});
+  }, []);
 
   // Listen for job-progress events as a live log source
   useEffect(() => {
@@ -52,6 +66,28 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  const handleLogLevelChange = async (level: string) => {
+    try {
+      await setLogLevel(level);
+      setLogLevelState(level);
+      showMessage(`Log level set to: ${level}`);
+    } catch (err) {
+      showError(typeof err === 'string' ? err : 'Failed to set log level');
+    }
+  };
+
+  const handleExportBundle = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const dir = await open({ directory: true, title: 'Choose folder for support bundle' });
+      if (!dir) return;
+      const bundlePath = await exportSupportBundle(dir as string);
+      showMessage(`Support bundle saved to: ${bundlePath}`);
+    } catch (err) {
+      showError(typeof err === 'string' ? err : 'Failed to export support bundle');
+    }
+  };
 
   const handleTestTools = async () => {
     try {
@@ -130,8 +166,42 @@ export function DebugTools({ showMessage, showError }: DebugToolsProps) {
     <div className="settings-section">
       <h2 className="settings-section-title">Debug Tools</h2>
       <p className="settings-section-description">
-        System diagnostics, logs, and database tools.
+        System diagnostics, health, logs, and database tools.
       </p>
+
+      {/* System Health */}
+      <SystemHealthPanel />
+
+      {/* Log Level */}
+      <div className="devmenu-form-group">
+        <label className="devmenu-label">Log Level</label>
+        <div className="devmenu-inline">
+          {['debug', 'info', 'warn', 'error'].map((level) => (
+            <label key={level} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="logLevel"
+                value={level}
+                checked={logLevel === level}
+                onChange={() => handleLogLevelChange(level)}
+              />
+              {level.charAt(0).toUpperCase() + level.slice(1)}
+            </label>
+          ))}
+        </div>
+        <span className="devmenu-hint">Changes take effect immediately. Persists across restarts.</span>
+      </div>
+
+      {/* Support Bundle */}
+      <div className="devmenu-form-group">
+        <label className="devmenu-label">Support Bundle</label>
+        <button className="secondary-button" onClick={handleExportBundle}>
+          Export Support Bundle
+        </button>
+        <span className="devmenu-hint">
+          Exports log files, system info, tool versions, and library stats into one folder.
+        </span>
+      </div>
 
       {/* Log Viewer */}
       <div className="devmenu-form-group">

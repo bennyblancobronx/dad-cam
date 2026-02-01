@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 // Re-export public API (preserves external interface)
 pub use job_setup::create_ingest_job;
 pub use pipeline::{run_ingest_job, run_ingest_job_with_progress};
+#[allow(unused_imports)]
 pub use verification::{WipeReport, WipeReportEntry, wipe_source_files, run_rescan};
 pub(crate) use matching::{
     match_app_profile_rules, match_bundled_profile_rules,

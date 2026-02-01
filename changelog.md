@@ -4,6 +4,16 @@ This is the source of truth for version number.
 
 ---
 
+0.1.155 -- Observability gaps: support bundle, health panel, toasts, log level, warning cleanup
+
+- Added export_support_bundle command: one-click export of log files + system info + tool versions + library stats + recent errors into a single folder. Available in Settings > About and Dev Menu.
+- Added get_system_health command: returns pending jobs by type, failed jobs (24h), disk usage (originals/derived/DB), and last error message. Displayed in Dev Menu > Debug > System Health panel.
+- Added toast notifications for background job failures. When a job emits isError, a dismissable toast appears at bottom-right. Auto-dismisses after 8 seconds, stacks up to 3.
+- Added runtime log level toggle (debug/info/warn/error). Changes take effect immediately via log::set_max_level. Persists to App DB and restores on startup. Available in Dev Menu > Debug > Log Level.
+- Fixed cli.rs line 1297: changed informational eprintln to println (multi-worker note was going to stderr instead of stdout).
+- Cleaned all compiler warnings: suppressed dead_code on matching.rs pipeline functions and cli.rs binary, fixed unused assignment in cli.rs dedup logic, suppressed unused_imports on verification re-exports used only by lib crate. Both targets now build with zero warnings.
+- Split DebugTools.tsx: extracted SystemHealthPanel into its own component to stay under 400-line limit.
+
 0.1.154 -- Structured logging + diagnostics preference
 
 - Added tauri-plugin-log: all Rust and frontend logs now write to persistent rotating log files in the OS log directory (~/Library/Logs/com.dadcam.app/ on macOS). Max 5 files at 5MB each.
